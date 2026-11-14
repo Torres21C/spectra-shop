@@ -18,6 +18,22 @@ jobs:
   quality:
     name: Lint, tipos, pruebas y build
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://spectra_ci:spectra_ci@localhost:5432/spectra_ci?schema=catalog
+    services:
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_DB: spectra_ci
+          POSTGRES_USER: spectra_ci
+          POSTGRES_PASSWORD: spectra_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spectra_ci -d spectra_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -29,6 +45,11 @@ jobs:
       - name: npm reproducible
         run: npm install --global npm@11.19.0
       - run: npm ci
+      - name: Preparar PostgreSQL de integración
+        run: |
+          npm run prisma:generate --workspace @spectra/catalog-service
+          npm run db:deploy --workspace @spectra/catalog-service
+          npm run db:seed:dev --workspace @spectra/catalog-service
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck

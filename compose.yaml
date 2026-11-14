@@ -42,6 +42,11 @@ services:
       dockerfile: apps/catalog-service/Dockerfile
     environment:
       PORT: '3002'
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports: ['127.0.0.1:3002:3002']
     healthcheck:
       test:
@@ -55,6 +60,46 @@ services:
       timeout: 3s
       retries: 10
     networks: [edge, backend]
+
+  catalog-test:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: apps/catalog-service/Dockerfile
+      target: build
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      [
+        'sh',
+        '-c',
+        'npm run db:deploy --workspace @spectra/catalog-service && npm run db:seed:dev --workspace @spectra/catalog-service && npm test --workspace @spectra/catalog-service',
+      ]
+    networks: [backend]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports: ['127.0.0.1:5173:5173']
+    depends_on:
+      catalog-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:5173').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [edge]
 
   commerce-service:
     build:
