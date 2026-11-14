@@ -1,0 +1,105 @@
+name: spectra-shop
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Define POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Define POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [backend]
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: apps/identity-service/Dockerfile
+    environment:
+      PORT: '3001'
+    ports: ['127.0.0.1:3001:3001']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [edge, backend]
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: apps/catalog-service/Dockerfile
+    environment:
+      PORT: '3002'
+    ports: ['127.0.0.1:3002:3002']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [edge, backend]
+
+  commerce-service:
+    build:
+      context: .
+      dockerfile: apps/commerce-service/Dockerfile
+    environment:
+      PORT: '3003'
+    ports: ['127.0.0.1:3003:3003']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3003/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [edge, backend]
+
+  audit-service:
+    build:
+      context: .
+      dockerfile: apps/audit-service/Dockerfile
+    environment:
+      PORT: '3004'
+    ports: ['127.0.0.1:3004:3004']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3004/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [edge, backend]
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:

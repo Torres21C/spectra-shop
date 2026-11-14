@@ -1,0 +1,113 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, tipos, pruebas y build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  secrets:
+    name: Secretos (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout completo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Instalar Semgrep fijado
+        run: pipx install semgrep==1.136.0
+      - name: Validar las 14 reglas propias
+        run: semgrep --validate --metrics=off --config security/semgrep
+      - name: Probar reglas backend
+        run: semgrep --test --metrics=off --config security/semgrep/spectra-backend.yaml security/semgrep/spectra-backend.ts
+      - name: Analizar código
+        run: >-
+          semgrep scan --metrics=off
+          --config security/semgrep/spectra-backend.yaml
+          --config security/semgrep/spectra-frontend.yaml
+          --severity ERROR --error
+          --sarif --output semgrep.sarif
+          apps packages
+      - name: Guardar reporte Semgrep
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: semgrep-report
+          path: semgrep.sarif
+          if-no-files-found: warn
+
+  sca:
+    name: SCA y SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Auditoría de dependencias de producción
+        run: npm audit --omit=dev --audit-level=high
+      - name: SBOM CycloneDX
+        run: npm exec -- cyclonedx-npm --output-file sbom.cdx.json
+      - name: OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@1e54355a8b4c8abaa8cc7d0b70aa655a3bb15a6c
+        env:
+          JAVA_HOME: /opt/jdk
+        with:
+          project: spectra-shop
+          path: .
+          format: ALL
+          args: >-
+            --failOnCVSS 7
+            --suppression .dependency-check/suppressions.xml
+            --nvdApiKey ${{ secrets.NVD_API_KEY }}
+      - name: Guardar reportes SCA
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sca-reports
+          path: |
+            reports/
+            sbom.cdx.json
+          if-no-files-found: warn

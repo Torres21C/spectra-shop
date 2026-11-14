@@ -1,0 +1,132 @@
+# SPECTRA Shop - reglas Semgrep propias para el backend (NestJS / TypeScript).
+# Complementan los rulesets del registro (p/owasp-top-ten, p/typescript, p/nodejs, p/jwt, p/secrets).
+# Probar con:  semgrep --test 04-Fase-3/config/semgrep/
+rules:
+  - id: spectra-prisma-raw-unsafe
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Consulta SQL cruda no parametrizada ($queryRawUnsafe / $executeRawUnsafe). Usar la API del ORM
+      o $queryRaw con plantilla etiquetada (RS03, CTL-08).
+    metadata: { requisito: RS03, control: CTL-08, cwe: 'CWE-89', owasp: ['A03:2021', 'A05:2025'] }
+    pattern-either:
+      - pattern: $CLIENT.$queryRawUnsafe(...)
+      - pattern: $CLIENT.$executeRawUnsafe(...)
+
+  - id: spectra-sql-string-building
+    languages: [typescript]
+    severity: ERROR
+    message: SQL construido por concatenación o interpolación. Usar parámetros ($1, $2) o el ORM (RS03).
+    metadata: { requisito: RS03, control: CTL-08, cwe: 'CWE-89', owasp: ['A03:2021', 'A05:2025'] }
+    patterns:
+      - pattern: $DB.query($SQL, ...)
+      - metavariable-pattern:
+          metavariable: $SQL
+          pattern-either:
+            - pattern: '"..." + $X'
+            - pattern: '"..." + $X + "..."'
+            - pattern: '$X + "..."'
+            - pattern: '`...${$X}...`'
+
+  - id: spectra-jwt-verify-without-algorithms
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Verificación de JWT sin fijar 'algorithms'. Fijar ['ES256'] para impedir alg=none o confusión
+      de algoritmo (RS01, CTL-02).
+    metadata: { requisito: RS01, control: CTL-02, cwe: 'CWE-347', owasp: ['A07:2021', 'A07:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: $JWT.verify($TOKEN, $KEY)
+          - pattern: $JWT.verify($TOKEN, $KEY, $OPTS)
+      - pattern-not: '$JWT.verify($TOKEN, $KEY, {..., algorithms: $ALGS, ...})'
+      - metavariable-regex:
+          metavariable: $JWT
+          regex: (?i)^(jwt|jsonwebtoken|jwtService|this\.jwtService|jose)$
+
+  - id: spectra-cookie-without-httponly
+    languages: [typescript]
+    severity: ERROR
+    message: Cookie emitida sin httpOnly true. Las cookies de sesión deben ser HttpOnly, Secure y SameSite=Strict (RS01, CTL-02).
+    metadata: { requisito: RS01, control: CTL-02, cwe: 'CWE-1004', owasp: ['A07:2021', 'A07:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: $RES.cookie($NAME, $VALUE)
+          - pattern: $RES.cookie($NAME, $VALUE, $OPTS)
+      - pattern-not: '$RES.cookie($NAME, $VALUE, {..., httpOnly: true, ...})'
+
+  - id: spectra-cookie-without-secure
+    languages: [typescript]
+    severity: ERROR
+    message: Cookie emitida sin secure true (RS01, CTL-02).
+    metadata: { requisito: RS01, control: CTL-02, cwe: 'CWE-614', owasp: ['A07:2021', 'A07:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: $RES.cookie($NAME, $VALUE)
+          - pattern: $RES.cookie($NAME, $VALUE, $OPTS)
+      - pattern-not: '$RES.cookie($NAME, $VALUE, {..., secure: true, ...})'
+
+  - id: spectra-validationpipe-without-whitelist
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      ValidationPipe sin whitelist y forbidNonWhitelisted. Los campos no declarados deben rechazarse
+      para impedir mass assignment (RS09, CTL-09).
+    metadata: { requisito: RS09, control: CTL-09, cwe: 'CWE-915', owasp: ['A01:2021', 'A01:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: new ValidationPipe()
+          - pattern: new ValidationPipe($OPTS)
+      - pattern-not: 'new ValidationPipe({..., forbidNonWhitelisted: true, ...})'
+
+  - id: spectra-sensitive-data-in-logs
+    languages: [typescript]
+    severity: ERROR
+    message: Posible registro de contraseña, token o cuerpo completo de la petición. Usar el logger con redacción (RS07, CTL-16).
+    metadata: { requisito: RS07, control: CTL-16, cwe: 'CWE-532', owasp: ['A09:2021', 'A09:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$M(..., $X.password, ...)
+          - pattern: $LOG.$M(..., $X.token, ...)
+          - pattern: $LOG.$M(..., $X.refreshToken, ...)
+          - pattern: $LOG.$M(..., $REQ.body, ...)
+          - pattern: $LOG.$M(..., $REQ.headers.authorization, ...)
+          - pattern: $LOG.$M(..., $REQ.headers.cookie, ...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(log|info|debug|warn|error|verbose|trace)$
+
+  - id: spectra-stack-trace-in-response
+    languages: [typescript]
+    severity: ERROR
+    message: La respuesta incluye la traza de la excepción. Devolver un mensaje genérico y el ID de correlación (RS11, CTL-17).
+    metadata: { requisito: RS11, control: CTL-17, cwe: 'CWE-209', owasp: ['A05:2021', 'A10:2025'] }
+    pattern-either:
+      - pattern: '$RES.json({..., stack: $E, ...})'
+      - pattern: '$RES.status($C).json({..., stack: $E, ...})'
+      - pattern: '$RES.send($ERR.stack)'
+
+  - id: spectra-weak-hash
+    languages: [typescript]
+    severity: ERROR
+    message: MD5 o SHA-1 no son aceptables para contraseñas ni integridad. Usar Argon2id para contraseñas (RS01, CTL-01).
+    metadata: { requisito: RS01, control: CTL-01, cwe: 'CWE-327', owasp: ['A02:2021', 'A04:2025'] }
+    pattern-either:
+      - pattern: $CRYPTO.createHash("md5")
+      - pattern: $CRYPTO.createHash("sha1")
+
+  - id: spectra-insecure-random-token
+    languages: [typescript]
+    severity: WARNING
+    message: Math.random() no es criptográficamente seguro. Usar crypto.randomBytes o crypto.randomUUID para tokens (RS01).
+    metadata: { requisito: RS01, control: CTL-03, cwe: 'CWE-338', owasp: ['A02:2021', 'A04:2025'] }
+    pattern: Math.random()
+
+  - id: spectra-dynamic-code-execution
+    languages: [typescript]
+    severity: ERROR
+    message: Ejecución dinámica de código (eval / new Function) prohibida (RS09).
+    metadata: { requisito: RS09, control: CTL-09, cwe: 'CWE-95', owasp: ['A03:2021', 'A05:2025'] }
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)

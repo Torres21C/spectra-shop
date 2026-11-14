@@ -1,0 +1,7 @@
+# Sustituir por el usuario u organización GitHub definitivos antes de activar protección.
+* @luisjt
+/apps/identity-service/ @luisjt
+/apps/commerce-service/ @luisjt
+/apps/audit-service/ @luisjt
+/infra/ @luisjt
+/.github/workflows/ @luisjt

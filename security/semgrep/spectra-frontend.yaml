@@ -1,0 +1,38 @@
+# SPECTRA Shop - reglas Semgrep propias para el frontend (React / TSX).
+rules:
+  - id: spectra-react-dangerously-set-inner-html
+    languages: [typescript]
+    severity: ERROR
+    message: dangerouslySetInnerHTML está prohibido; el contenido del catálogo es texto plano y React lo escapa (RS04, CTL-10).
+    metadata: { requisito: RS04, control: CTL-10, cwe: 'CWE-79', owasp: ['A03:2021', 'A05:2025'] }
+    pattern-either:
+      - pattern: <$EL dangerouslySetInnerHTML={$X} />
+      - pattern: <$EL dangerouslySetInnerHTML={$X}>$CHILDREN</$EL>
+      - pattern: '{dangerouslySetInnerHTML: $X}'
+
+  - id: spectra-token-in-web-storage
+    languages: [typescript]
+    severity: ERROR
+    message: Tokens en localStorage/sessionStorage quedan expuestos a XSS. La sesión vive en cookies HttpOnly (RS01, CTL-02).
+    metadata: { requisito: RS01, control: CTL-02, cwe: 'CWE-922', owasp: ['A07:2021', 'A07:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($KEY, $VALUE)
+          - pattern: sessionStorage.setItem($KEY, $VALUE)
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(token|jwt|session|auth).*
+
+  - id: spectra-unvalidated-redirect
+    languages: [typescript]
+    severity: WARNING
+    message: Redirección con un valor dinámico. Validar que sea una ruta interna antes de navegar (CA-M02-09, RS09).
+    metadata: { requisito: RS09, control: CTL-09, cwe: 'CWE-601', owasp: ['A01:2021', 'A01:2025'] }
+    patterns:
+      - pattern-either:
+          - pattern: window.location.href = $URL
+          - pattern: window.location.assign($URL)
+          - pattern: window.location.replace($URL)
+      - pattern-not: window.location.href = "..."
+      - pattern-not: window.location.assign("...")
+      - pattern-not: window.location.replace("...")

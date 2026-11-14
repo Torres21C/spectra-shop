@@ -1,0 +1,42 @@
+# Dependencies and builds
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Prisma and local data
+*.db
+*.db-journal
+prisma/dev.db
+
+# Logs and reports
+*.log
+reports/
+.dependency-check-data/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+!*.tfvars.example
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
