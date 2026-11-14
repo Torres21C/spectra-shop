@@ -20,12 +20,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22'
           cache: npm
+      - name: npm reproducible
+        run: npm install --global npm@11.19.0
       - run: npm ci
       - run: npm run format:check
       - run: npm run lint
@@ -38,11 +40,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout completo
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -51,24 +53,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Instalar Semgrep fijado
-        run: pipx install semgrep==1.136.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Validar las 14 reglas propias
-        run: semgrep --validate --metrics=off --config security/semgrep
+        run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/src"
+          semgrep/semgrep@sha256:cda1b566fafbf6010a02a3ea1d265b1c8eba4380e489a13891a102243d81ca6f
+          semgrep --validate --metrics=off --config /src/security/semgrep
       - name: Probar reglas backend
-        run: semgrep --test --metrics=off --config security/semgrep/spectra-backend.yaml security/semgrep/spectra-backend.ts
+        run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/src"
+          semgrep/semgrep@sha256:cda1b566fafbf6010a02a3ea1d265b1c8eba4380e489a13891a102243d81ca6f
+          semgrep --test --metrics=off
+          --config /src/security/semgrep/spectra-backend.yaml
+          /src/security/semgrep/spectra-backend.ts
       - name: Analizar código
         run: >-
+          docker run --rm -v "$GITHUB_WORKSPACE:/src"
+          semgrep/semgrep@sha256:cda1b566fafbf6010a02a3ea1d265b1c8eba4380e489a13891a102243d81ca6f
           semgrep scan --metrics=off
-          --config security/semgrep/spectra-backend.yaml
-          --config security/semgrep/spectra-frontend.yaml
+          --config /src/security/semgrep/spectra-backend.yaml
+          --config /src/security/semgrep/spectra-frontend.yaml
           --severity ERROR --error
-          --sarif --output semgrep.sarif
-          apps packages
+          --sarif --output /src/semgrep.sarif
+          /src/apps /src/packages
       - name: Guardar reporte Semgrep
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: semgrep-report
           path: semgrep.sarif
@@ -79,12 +89,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22'
           cache: npm
+      - name: npm reproducible
+        run: npm install --global npm@11.19.0
       - run: npm ci
       - name: Auditoría de dependencias de producción
         run: npm audit --omit=dev --audit-level=high
@@ -101,10 +113,9 @@ jobs:
           args: >-
             --failOnCVSS 7
             --suppression .dependency-check/suppressions.xml
-            --nvdApiKey ${{ secrets.NVD_API_KEY }}
       - name: Guardar reportes SCA
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: sca-reports
           path: |
