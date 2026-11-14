@@ -21,6 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://spectra_ci:spectra_ci@localhost:5432/spectra_ci?schema=catalog
+      IDENTITY_DATABASE_URL: postgresql://spectra_ci:spectra_ci@localhost:5432/spectra_ci?schema=identity
+      IDENTITY_ALLOW_EPHEMERAL_KEYS: 'true'
+      COOKIE_SECURE: 'true'
+      CORS_ORIGINS: https://127.0.0.1:5173
     services:
       postgres:
         image: postgres:16.6-alpine
@@ -51,6 +55,9 @@ jobs:
           npm run prisma:generate --workspace @spectra/catalog-service
           npm run db:deploy --workspace @spectra/catalog-service
           npm run db:seed:dev --workspace @spectra/catalog-service
+          npm run prisma:generate --workspace @spectra/identity-service
+          npm run db:deploy --workspace @spectra/identity-service
+          npm run db:seed:dev --workspace @spectra/identity-service
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck

@@ -81,6 +81,108 @@ a {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+.account-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.account-nav a,
+.account-nav button {
+  color: #172235;
+  background: transparent;
+  border: 0;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.auth-page {
+  min-height: calc(100vh - 150px);
+  padding: 4rem max(5vw, 1.25rem);
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #edf3ed, #f4f0e8 58%, #e6dcd1);
+}
+.auth-card {
+  width: min(100%, 620px);
+  padding: clamp(1.5rem, 5vw, 3.5rem);
+  background: #fffdf8;
+  border: 1px solid #ded8cd;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(23, 34, 53, 0.12);
+}
+.auth-card h1 {
+  margin: 0.45rem 0 1rem;
+  font:
+    700 clamp(2.2rem, 6vw, 4rem)/1 Georgia,
+    serif;
+}
+.auth-card > p {
+  color: #526074;
+  line-height: 1.6;
+}
+.auth-form {
+  display: grid;
+  gap: 1rem;
+  margin: 2rem 0 1.5rem;
+}
+.auth-form label:not(.check-field) {
+  display: grid;
+  gap: 0.45rem;
+  color: #526074;
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+.auth-form input:not([type='checkbox']) {
+  min-height: 48px;
+  padding: 0 0.9rem;
+  border: 1px solid #cfc7bb;
+  border-radius: 10px;
+  background: #f7f4ed;
+}
+.check-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  line-height: 1.5;
+}
+.form-message {
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  background: #e5f1ec;
+  color: #174d42 !important;
+}
+.primary-link {
+  display: inline-block;
+  padding: 0.8rem 1.1rem;
+  color: #fff;
+  background: #172235;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 800;
+}
+.profile-list {
+  display: grid;
+  gap: 0;
+  margin: 2rem 0;
+}
+.profile-list div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 1rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid #ded8cd;
+}
+.profile-list dt {
+  font-weight: 800;
+}
+.profile-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.orders-placeholder {
+  padding-top: 1rem;
+}
 
 main {
   width: 100%;
