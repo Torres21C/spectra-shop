@@ -8,17 +8,19 @@ COPY apps/commerce-service/package.json apps/commerce-service/package.json
 COPY apps/audit-service/package.json apps/audit-service/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
-RUN npm ci --ignore-scripts
+RUN npm ci
 COPY tsconfig.base.json ./
 COPY apps/catalog-service apps/catalog-service
 COPY packages/contracts packages/contracts
-RUN npm run build --workspace @spectra/contracts && npm run build --workspace @spectra/catalog-service
+RUN npm run prisma:generate --workspace @spectra/catalog-service && npm run build --workspace @spectra/contracts && npm run build --workspace @spectra/catalog-service
 
 FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944
 ENV NODE_ENV=production
 WORKDIR /app
 USER node
 COPY --from=build --chown=node:node /workspace/node_modules /app/node_modules
+COPY --from=build --chown=node:node /workspace/apps/catalog-service/node_modules /app/node_modules
 COPY --from=build --chown=node:node /workspace/apps/catalog-service/dist /app/dist
+COPY --from=build --chown=node:node /workspace/apps/catalog-service/prisma /app/prisma
 EXPOSE 3002
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && node dist/database/seed.js && node dist/main.js"]
