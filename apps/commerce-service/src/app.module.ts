@@ -7,6 +7,7 @@ import { NoStoreMiddleware } from './common/no-store.middleware.js';
 import { RequestContextMiddleware } from './common/request-context.js';
 import { SafeExceptionFilter } from './common/safe-exception.filter.js';
 import { DatabaseModule } from './database/database.module.js';
+import { OrdersModule } from './orders/orders.module.js';
 import { HealthController } from './health.controller.js';
 
 @Module({
@@ -15,6 +16,7 @@ import { HealthController } from './health.controller.js';
     DatabaseModule,
     CartModule,
     CheckoutModule,
+    OrdersModule,
   ],
   controllers: [HealthController],
   providers: [

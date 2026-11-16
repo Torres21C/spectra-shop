@@ -4,7 +4,6 @@ import {
   Controller,
   Get,
   Headers,
-  Param,
   Post,
   Req,
   Res,
@@ -17,7 +16,6 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiHeader,
-  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiServiceUnavailableResponse,
@@ -32,7 +30,7 @@ import { CartAccessGuard } from '../auth/cart-access.guard.js';
 import { CsrfService } from '../auth/csrf.service.js';
 import type { AuditActor } from '../common/outbox.service.js';
 import type { CommerceRequest } from '../common/request-context.js';
-import { OrderIdDto, PlaceOrderDto } from './checkout.dto.js';
+import { PlaceOrderDto } from './checkout.dto.js';
 import { UUID_V4 } from './checkout.helpers.js';
 import { CheckoutService } from './checkout.service.js';
 
@@ -45,7 +43,9 @@ function actorOf(request: CommerceRequest): AuditActor {
   };
 }
 
-/** M04 Checkout. Solo CLIENTE con JWT ES256 válido y sesión activa en Identity. */
+/**
+ * M04 Checkout. El detalle `GET /orders/:orderId` pasó a OrdersController (M05) con el mismo
+ * contrato ampliado. Solo CLIENTE con JWT ES256 válido y sesión activa en Identity. */
 @ApiTags('Checkout y pedidos')
 @ApiCookieAuth('access-cookie')
 @UseGuards(CartAccessGuard)
@@ -102,13 +102,5 @@ export class CheckoutController {
     const outcome = await this.checkout.place(actorOf(request), rawKey.toLowerCase(), dto);
     response.status(outcome.status);
     return outcome.order;
-  }
-
-  @Get('orders/:orderId')
-  @ApiOperation({ summary: 'Confirmación de un pedido propio (pantalla P06)' })
-  @ApiOkResponse({ description: 'Pedido con precios congelados' })
-  @ApiNotFoundResponse({ description: 'Pedido ajeno o inexistente (respuesta uniforme)' })
-  order(@Param() params: OrderIdDto, @Req() request: CommerceRequest): Promise<OrderConfirmation> {
-    return this.checkout.order(actorOf(request), params.orderId);
   }
 }

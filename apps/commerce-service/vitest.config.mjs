@@ -11,6 +11,7 @@ export default defineConfig({
       include: [
         'src/cart/**/*.ts',
         'src/checkout/**/*.ts',
+        'src/orders/**/*.ts',
         'src/catalog/inventory-client.service.ts',
       ],
       exclude: ['src/**/*.test.ts'],

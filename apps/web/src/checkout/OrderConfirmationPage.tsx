@@ -86,7 +86,10 @@ export function OrderConfirmationPage({ orderId }: { orderId: string }) {
             <p>Total pagado (simulado)</p>
             <strong>{formatPrice(order.total)}</strong>
             <small>Referencia {order.paymentReference}</small>
-            <a className="primary-link" href="#/">
+            <a className="primary-link" href={`#/pedidos/${order.id}`}>
+              Ver seguimiento del pedido
+            </a>
+            <a className="checkout-link" href="#/">
               Seguir comprando
             </a>
           </aside>

@@ -200,7 +200,8 @@ export function decodeOrder(value: unknown): OrderConfirmation {
   };
 }
 
-async function execute(
+/** Petición autenticada a Commerce con un reintento tras renovar la sesión (compartida con M05). */
+export async function execute(
   path: string,
   init: RequestInit | undefined,
   retry = true,

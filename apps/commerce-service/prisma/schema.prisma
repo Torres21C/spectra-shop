@@ -121,13 +121,18 @@ model Order {
   shippingReferences  String?         @map("shipping_references") @db.VarChar(200)
   paymentReference    String          @unique @map("payment_reference") @db.VarChar(32)
   paidAt              DateTime        @map("paid_at") @db.Timestamptz(3)
+  /// M05 (D-M05-01): línea de tiempo por columnas de fecha; las escribe M06 al cambiar el estado.
+  preparingAt         DateTime?       @map("preparing_at") @db.Timestamptz(3)
+  shippedAt           DateTime?       @map("shipped_at") @db.Timestamptz(3)
+  deliveredAt         DateTime?       @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt         DateTime?       @map("cancelled_at") @db.Timestamptz(3)
   createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
   attempt             CheckoutAttempt @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict)
   items               OrderItem[]
 
   @@unique([userId, idempotencyKey])
-  @@index([userId, createdAt])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)], map: "orders_user_id_created_at_id_idx")
   @@map("orders")
 }
 

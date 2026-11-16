@@ -5,7 +5,6 @@ import {
   HttpStatus,
   Injectable,
   Logger,
-  NotFoundException,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -29,6 +28,7 @@ import {
 import { type AuditActor, OutboxService } from '../common/outbox.service.js';
 import { commerceConfig } from '../config/commerce.config.js';
 import { PrismaService } from '../database/prisma.service.js';
+import { presentConfirmation } from '../orders/orders.helpers.js';
 import type { PlaceOrderDto } from './checkout.dto.js';
 import {
   type AttemptLine,
@@ -47,8 +47,6 @@ export interface PlaceOutcome {
 }
 
 export type ReconcileResult = 'SKIPPED' | 'COMPLETED' | 'ABORTED' | 'DEFERRED';
-
-type OrderWithItems = Prisma.OrderGetPayload<{ include: { items: true } }>;
 
 /** El arrendamiento del intento pasó a otro proceso (reconciliador o reintento). */
 class LeaseLostError extends Error {
@@ -246,30 +244,6 @@ export class CheckoutService {
     const started = await this.begin(actor, key, dto, hash, false);
     if (started.kind === 'replay') return this.replay(started.attempt, hash, actor, dto, 0);
     return this.drive(started.attempt, started.owner, actor);
-  }
-
-  async order(actor: AuditActor, orderId: string): Promise<OrderConfirmation> {
-    // RN-20: el filtro de propiedad forma parte de la consulta, nunca solo de la UI.
-    const order = await this.prisma.order.findFirst({
-      where: { id: orderId, userId: actor.userId },
-      include: { items: { orderBy: { productId: 'asc' } } },
-    });
-    if (order) return this.present(order);
-    const foreign = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      select: { id: true },
-    });
-    if (foreign) {
-      await this.outbox.record(actor, {
-        eventType: 'ACCESS_DENIED',
-        result: 'DENEGADO',
-        resourceType: 'order',
-        resourceId: orderId,
-        metadata: { operation: 'GET /orders/:id' },
-      });
-    }
-    // Respuesta idéntica para pedido ajeno o inexistente (CA-M05-02, RN-21).
-    throw new NotFoundException({ code: 'ORDER_NOT_FOUND', message: 'Pedido no encontrado' });
   }
 
   /**
@@ -995,34 +969,6 @@ export class CheckoutService {
       where: { checkoutAttemptId: attempt.id },
       include: { items: { orderBy: { productId: 'asc' } } },
     });
-    return this.present(order);
-  }
-
-  private present(order: OrderWithItems): OrderConfirmation {
-    return {
-      id: order.id,
-      orderNumber: order.orderNumber,
-      status: order.status,
-      total: order.total.toFixed(2),
-      currency: 'GTQ',
-      itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
-      paymentReference: order.paymentReference,
-      createdAt: order.createdAt.toISOString(),
-      items: order.items.map((item) => ({
-        productId: item.productId,
-        name: item.productNameSnapshot,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice.toFixed(2),
-        lineTotal: item.lineTotal.toFixed(2),
-      })),
-      shipping: {
-        recipientName: order.shippingName,
-        phone: order.shippingPhone,
-        department: order.shippingDepartment,
-        municipality: order.shippingMunicipality,
-        address: order.shippingAddress,
-        ...(order.shippingReferences ? { references: order.shippingReferences } : {}),
-      },
-    };
+    return presentConfirmation(order);
   }
 }
