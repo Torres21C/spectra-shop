@@ -13,5 +13,14 @@ export const inventoryConfig = {
   /** Intervalo del barrido de reservas vencidas; 0 lo limita al arranque. */
   sweepIntervalMs: integerEnv('RESERVATION_SWEEP_INTERVAL_MS', 10_000, 0, 600_000),
   sweepBatchSize: 50,
+  /** DT-08: antigüedad desde la confirmación a partir de la cual una reserva sin reconocer se informa. */
+  unfulfilledAgeSeconds: integerEnv('RESERVATION_UNFULFILLED_AGE_SECONDS', 300, 0, 604_800),
+  /** DT-08: intervalo del monitor de reservas sin reconocer; 0 lo limita al arranque. */
+  deliveryMonitorIntervalMs: integerEnv(
+    'RESERVATION_DELIVERY_MONITOR_INTERVAL_MS',
+    60_000,
+    0,
+    3_600_000,
+  ),
   caller: 'commerce-service',
 };

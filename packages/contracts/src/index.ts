@@ -116,7 +116,20 @@ export interface ShoppingCart {
   readonly updatedAt: string;
 }
 
-export type StockReservationStatus = 'PENDING' | 'CONFIRMED' | 'RELEASED';
+/**
+ * Estados internos de una reserva de Catalog. DT-08 (M06.0) añade FULFILLED (Commerce reconoció
+ * técnicamente la reserva con su pedido; no es entrega física) y RESTOCKED (reposición por una
+ * cancelación futura de M06). Nunca se exponen como estados públicos del pedido.
+ */
+export type StockReservationStatus =
+  'PENDING' | 'CONFIRMED' | 'FULFILLED' | 'RESTOCKED' | 'RELEASED';
+
+/** Estados posteriores al punto de no retorno: el stock descontado nunca se libera automáticamente. */
+export const RESERVATION_COMMITTED_STATUSES: readonly StockReservationStatus[] = [
+  'CONFIRMED',
+  'FULFILLED',
+  'RESTOCKED',
+];
 
 export interface StockReservationLineRequest {
   readonly productId: string;
@@ -148,6 +161,31 @@ export interface StockReservationState {
   readonly status: StockReservationStatus | 'NOT_FOUND';
   readonly expired: boolean;
   readonly lines: readonly StockReservationLine[];
+}
+
+/** DT-08: solicitud de reconocimiento de entrega (Commerce → Catalog, listener interno). */
+export interface StockReservationFulfillRequest {
+  readonly orderId: string;
+}
+
+/** DT-08: reserva reconocida por Commerce y vinculada de forma única a un pedido. */
+export interface StockReservationFulfillment {
+  readonly reservationId: string;
+  readonly status: 'FULFILLED' | 'RESTOCKED';
+  readonly orderId: string;
+  readonly confirmedAt: string;
+  readonly fulfilledAt: string;
+}
+
+/** DT-08: reporte de reservas CONFIRMED sin reconocimiento de entrega (no compensa nada). */
+export interface UnfulfilledReservationsReport {
+  readonly total: number;
+  readonly oldestConfirmedAt: string | null;
+  readonly items: readonly {
+    readonly reservationId: string;
+    readonly confirmedAt: string;
+    readonly ageSeconds: number;
+  }[];
 }
 
 export interface StockReservationConflict {

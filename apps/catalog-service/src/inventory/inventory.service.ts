@@ -10,7 +10,9 @@ import { Prisma } from '@prisma/client';
 import type {
   CheckoutConflictLine,
   StockReservation,
+  StockReservationFulfillment,
   StockReservationState,
+  UnfulfilledReservationsReport,
 } from '@spectra/contracts';
 import { PrismaService } from '../database/prisma.service.js';
 import { inventoryConfig } from './inventory.config.js';
@@ -34,11 +36,22 @@ export function reservationRequestHash(lines: readonly ReservationLineDto[]): st
   return createHash('sha256').update(`v1|${canonical}`, 'utf8').digest('hex');
 }
 
+/** Estados posteriores al punto de no retorno: su stock nunca se libera automáticamente. */
+const COMMITTED = new Set(['CONFIRMED', 'FULFILLED', 'RESTOCKED']);
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code === 'P2002') return true;
+  // $executeRaw informa la violación de unicidad como P2010 con el SQLSTATE de PostgreSQL.
+  return error.code === 'P2010' && Reflect.get(error.meta ?? {}, 'code') === '23505';
+}
+
 /**
  * Inventario de M04. Cada operación es una transacción ACID local de Catalog:
  * - reserve: todo o nada; descuenta stock con UPDATE condicional (sin sobreventa).
  * - confirm: punto de no retorno; solo acepta reservas PENDING no vencidas (reloj de BD).
  * - release: compensación idempotente; repone stock una sola vez y deja lápida si no existe.
+ * - fulfill (DT-08): Commerce reconoce una reserva CONFIRMED con su pedido; no toca el stock.
  */
 @Injectable()
 export class InventoryService {
@@ -135,7 +148,8 @@ export class InventoryService {
        WHERE "id" = ${reservationId}::uuid AND "status" = 'PENDING' AND "expires_at" > now()`;
     const reservation = await this.load(reservationId);
     if (!reservation) this.notFound();
-    if (confirmed === 1 || reservation.status === 'CONFIRMED') return this.present(reservation);
+    // Una confirmación repetida después del reconocimiento (FULFILLED/RESTOCKED) sigue siendo válida.
+    if (confirmed === 1 || COMMITTED.has(reservation.status)) return this.present(reservation);
     if (reservation.status === 'PENDING') {
       // Vencida: ya no puede confirmarse; se compensa de inmediato en lugar de esperar al barrido.
       await this.releaseExpired(reservationId);
@@ -148,7 +162,8 @@ export class InventoryService {
       const released = await this.releaseWhere(reservationId, reason, false);
       if (released) return this.state(reservationId);
       const reservation = await this.load(reservationId);
-      if (reservation?.status === 'CONFIRMED') {
+      // Después del punto de no retorno nunca se libera (CONFIRMED, FULFILLED o RESTOCKED).
+      if (reservation && COMMITTED.has(reservation.status)) {
         throw new ConflictException({ code: 'RESERVATION_CONFIRMED' });
       }
       if (reservation?.status === 'RELEASED') return this.state(reservationId);
@@ -178,6 +193,98 @@ export class InventoryService {
       status: reservation.status,
       expired: reservation.status === 'PENDING' && rows[0]?.expired === true,
       lines: present.lines,
+    };
+  }
+
+  /**
+   * DT-08: Commerce reconoce técnicamente la reserva con su pedido (CONFIRMED → FULFILLED).
+   * La transición es un único UPDATE condicional; la pareja reservationId + orderId es la clave de
+   * idempotencia: repetirla devuelve el estado actual sin modificar stock ni fechas. Nunca libera stock.
+   */
+  async fulfill(
+    reservationId: string,
+    orderId: string,
+  ): Promise<{ created: boolean; fulfillment: StockReservationFulfillment }> {
+    let changed: number;
+    try {
+      changed = await this.prisma.$executeRaw`
+        UPDATE "catalog"."stock_reservations"
+           SET "status" = 'FULFILLED', "order_id" = ${orderId}::uuid, "fulfilled_at" = now()
+         WHERE "id" = ${reservationId}::uuid AND "status" = 'CONFIRMED'`;
+    } catch (error: unknown) {
+      // El pedido ya está vinculado a otra reserva (índice único sobre order_id).
+      if (isUniqueViolation(error)) {
+        this.logger.warn({
+          event: 'stock_reservation_fulfill_conflict',
+          reservationId,
+          code: 'ORDER_RESERVATION_MISMATCH',
+        });
+        throw new ConflictException({ code: 'ORDER_RESERVATION_MISMATCH' });
+      }
+      throw error;
+    }
+    const reservation = await this.prisma.stockReservation.findUnique({
+      where: { id: reservationId },
+      select: { id: true, status: true, orderId: true, confirmedAt: true, fulfilledAt: true },
+    });
+    if (!reservation) this.notFound();
+    if (reservation.status === 'FULFILLED' || reservation.status === 'RESTOCKED') {
+      if (reservation.orderId !== orderId) {
+        this.logger.warn({
+          event: 'stock_reservation_fulfill_conflict',
+          reservationId,
+          code: 'RESERVATION_ORDER_MISMATCH',
+        });
+        throw new ConflictException({ code: 'RESERVATION_ORDER_MISMATCH' });
+      }
+      if (changed === 1) {
+        this.logger.log({ event: 'stock_reservation_fulfilled', reservationId });
+      }
+      return {
+        created: changed === 1,
+        fulfillment: {
+          reservationId,
+          status: reservation.status,
+          orderId,
+          confirmedAt: reservation.confirmedAt!.toISOString(),
+          fulfilledAt: reservation.fulfilledAt!.toISOString(),
+        },
+      };
+    }
+    const code =
+      reservation.status === 'RELEASED' ? 'RESERVATION_RELEASED' : 'RESERVATION_NOT_CONFIRMED';
+    this.logger.warn({ event: 'stock_reservation_fulfill_conflict', reservationId, code });
+    throw new ConflictException({ code });
+  }
+
+  /**
+   * DT-08: reservas CONFIRMED sin reconocimiento de entrega más antiguas que el umbral. Detecta el
+   * caso de Commerce no recuperable (R27). Solo informa: nunca libera ni compensa stock.
+   */
+  async unfulfilledReport(
+    olderThanSeconds: number,
+    limit: number,
+  ): Promise<UnfulfilledReservationsReport> {
+    const [aggregate] = await this.prisma.$queryRaw<{ total: bigint; oldest: Date | null }[]>`
+      SELECT count(*) AS "total", min("confirmed_at") AS "oldest"
+        FROM "catalog"."stock_reservations"
+       WHERE "status" = 'CONFIRMED'
+         AND "confirmed_at" <= now() - (${olderThanSeconds}::int * interval '1 second')`;
+    const rows = await this.prisma.$queryRaw<{ id: string; confirmed_at: Date; age: number }[]>`
+      SELECT "id", "confirmed_at", floor(extract(epoch FROM now() - "confirmed_at"))::int AS "age"
+        FROM "catalog"."stock_reservations"
+       WHERE "status" = 'CONFIRMED'
+         AND "confirmed_at" <= now() - (${olderThanSeconds}::int * interval '1 second')
+       ORDER BY "confirmed_at" ASC, "id" ASC
+       LIMIT ${limit}`;
+    return {
+      total: Number(aggregate?.total ?? 0),
+      oldestConfirmedAt: aggregate?.oldest ? aggregate.oldest.toISOString() : null,
+      items: rows.map((row) => ({
+        reservationId: row.id,
+        confirmedAt: row.confirmed_at.toISOString(),
+        ageSeconds: row.age,
+      })),
     };
   }
 

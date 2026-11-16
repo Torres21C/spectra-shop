@@ -293,7 +293,9 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       const attempt = await attemptFor(ana.userId);
       expect(attempt).toMatchObject({ state: 'COMPLETED', orderId: confirmation.id });
       expect(attempt.shipping).toBeNull();
-      expect(await reservation(attempt.reservationId)).toBe('CONFIRMED');
+      // DT-08: tras C3, Commerce reconoce la reserva con su pedido (CONFIRMED → FULFILLED).
+      expect(await reservation(attempt.reservationId)).toBe('FULFILLED');
+      expect(attempt.inventoryFulfilledAt).toBeInstanceOf(Date);
       expect(
         await prisma.cart.findFirstOrThrow({ where: { userId: ana.userId, status: 'CONVERTIDO' } }),
       ).toBeTruthy();
@@ -776,7 +778,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       expect(final.state).toBe('COMPLETED');
       expect(final.reservationId).not.toBe(first.reservationId);
       expect(await reservation(first.reservationId)).toBe('RELEASED');
-      expect(await reservation(final.reservationId)).toBe('CONFIRMED');
+      expect(await reservation(final.reservationId)).toBe('FULFILLED');
       expect(await stock(STAND)).toBe(2);
       expect(await prisma.order.count()).toBe(1);
     });

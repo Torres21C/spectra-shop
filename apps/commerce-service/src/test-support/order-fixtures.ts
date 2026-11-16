@@ -56,6 +56,9 @@ export async function seedOrder(
         expectedUnitPrice: unitPrice,
       })),
       orderId,
+      // DT-08: pedido histórico ya reconocido por Catalog. Su reserva no existe en Catalog, así que
+      // el reconciliador de reconocimiento no debe tomarlo.
+      inventoryFulfilledAt: createdAt,
       expiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000),
       createdAt,
     },

@@ -66,6 +66,17 @@ export const commerceConfig = {
   /** M04.1: una saga en curso se declara atascada por antigüedad o por número de reintentos. */
   stuckAgeMs: integerEnv('CHECKOUT_STUCK_AGE_MS', 300_000, 10, 86_400_000),
   stuckAttempts: integerEnv('CHECKOUT_STUCK_ATTEMPTS', 5, 1, 1_000),
+  /** DT-08: reconciliador del reconocimiento de entrega (FULFILLED); 0 lo limita al arranque. */
+  fulfillmentIntervalMs: integerEnv('FULFILLMENT_RECOVERY_INTERVAL_MS', 15_000, 0, 600_000),
+  fulfillmentBatchSize: 20,
+  /** DT-08: arrendamiento por intento de reconocimiento (varias réplicas compiten por él). */
+  fulfillmentLeaseMs: integerEnv('FULFILLMENT_LEASE_MS', 30_000, 1_000, 300_000),
+  /** DT-08: backoff exponencial acotado de los reintentos (15 s, 30 s, 60 s… hasta 15 min). */
+  fulfillmentBackoffBaseMs: integerEnv('FULFILLMENT_RETRY_BASE_MS', 15_000, 10, 600_000),
+  fulfillmentBackoffMaxMs: integerEnv('FULFILLMENT_RETRY_MAX_MS', 900_000, 10, 86_400_000),
+  /** DT-08: el reconocimiento se declara atascado por reintentos o por antigüedad del pedido. */
+  fulfillmentStuckAttempts: integerEnv('FULFILLMENT_STUCK_ATTEMPTS', 5, 1, 1_000),
+  fulfillmentStuckAgeMs: integerEnv('FULFILLMENT_STUCK_AGE_MS', 300_000, 10, 86_400_000),
   /** Espera máxima de una petición duplicada concurrente antes de responder 409 en curso. */
   duplicateWaitMs: integerEnv('CHECKOUT_DUPLICATE_WAIT_MS', 5_000, 0, 30_000),
   /** RS10: intentos nuevos de checkout por cuenta y minuto. */

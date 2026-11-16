@@ -30,6 +30,7 @@ import { commerceConfig } from '../config/commerce.config.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { presentConfirmation } from '../orders/orders.helpers.js';
 import type { PlaceOrderDto } from './checkout.dto.js';
+import { InventoryFulfillmentService } from './inventory-fulfillment.service.js';
 import {
   type AttemptLine,
   orderTotals,
@@ -205,6 +206,7 @@ export class CheckoutService {
     private readonly catalog: CatalogClientService,
     private readonly inventory: InventoryClientService,
     private readonly outbox: OutboxService,
+    private readonly fulfillment: InventoryFulfillmentService,
   ) {}
 
   async summary(userId: string, requestId: string): Promise<CheckoutSummary> {
@@ -290,6 +292,11 @@ export class CheckoutService {
           // Lápida en Catalog: una reserva retrasada en la red ya no podrá aplicarse.
           state = await this.inventory.release(current.reservationId, requestId);
         }
+        if (state.status === 'FULFILLED' || state.status === 'RESTOCKED') {
+          // DT-08: Catalog ya vinculó la reserva a un pedido, pero esta saga no lo creó. Es una
+          // inconsistencia que requiere intervención: nunca se aborta ni se libera el stock.
+          throw new ReservationMismatchError();
+        }
         if (state.status !== 'CONFIRMED') {
           await this.terminate(current, owner, 'ABORTED', 'RECOVERY_RELEASED', undefined);
           this.logger.warn({ event: 'checkout_compensated', attemptId, requestId });
@@ -305,6 +312,8 @@ export class CheckoutService {
       }
       await this.complete(current, owner, actor);
       this.logger.log({ event: 'checkout_recovered_forward', attemptId, requestId });
+      // DT-08: primer reconocimiento de entrega; si falla, queda pendiente para su reconciliador.
+      await this.fulfillment.fulfill(attemptId, owner, requestId);
       await this.recordRecovered(attempt, 'COMPLETED', actor);
       return 'COMPLETED';
     } catch (error: unknown) {
@@ -641,6 +650,9 @@ export class CheckoutService {
         else if (attempt.state === 'RESERVED') attempt = await this.confirm(attempt, owner, actor);
         else if (attempt.state === 'CONFIRMED') {
           await this.complete(attempt, owner, actor);
+          // DT-08: reconocimiento inmediato tras C3. Nunca lanza ni cambia la respuesta: si Catalog
+          // no responde, el pedido se conserva y el reconciliador reintentará.
+          await this.fulfillment.fulfill(attempt.id, owner, actor.requestId);
           const completed = await this.prisma.checkoutAttempt.findUniqueOrThrow({
             where: { id: attempt.id },
           });
@@ -803,6 +815,8 @@ export class CheckoutService {
           shipping: Prisma.DbNull,
           leaseOwner: null,
           leaseUntil: null,
+          // DT-08: el mismo proceso hace el primer reconocimiento antes que el reconciliador.
+          ...InventoryFulfillmentService.leaseFor(owner),
         },
       });
       await tx.cart.updateMany({
