@@ -25,6 +25,9 @@ jobs:
       IDENTITY_ALLOW_EPHEMERAL_KEYS: 'true'
       COOKIE_SECURE: 'true'
       CORS_ORIGINS: https://127.0.0.1:5173
+      POSTGRES_DB: spectra_ci
+      POSTGRES_USER: spectra_ci
+      POSTGRES_PASSWORD: spectra_ci
     services:
       postgres:
         image: postgres:16.6-alpine
@@ -50,6 +53,18 @@ jobs:
       - name: npm reproducible
         run: npm install --global npm@11.19.0
       - run: npm ci
+      - name: Preparar credenciales efímeras de integración
+        shell: bash
+        run: |
+          keys_dir="$RUNNER_TEMP/spectra-keys"
+          mkdir -p "$keys_dir"
+          openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$keys_dir/private.pem"
+          openssl pkey -in "$keys_dir/private.pem" -pubout -out "$keys_dir/public.pem"
+          chmod 600 "$keys_dir/private.pem"
+          internal_token="$(openssl rand -hex 32)"
+          echo "SPECTRA_KEYS_DIR=$keys_dir" >> "$GITHUB_ENV"
+          echo "SPECTRA_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
+          echo "SPECTRA_INTERNAL_TOKENS=$internal_token" >> "$GITHUB_ENV"
       - name: Preparar PostgreSQL de integración
         run: |
           npm run prisma:generate --workspace @spectra/catalog-service
@@ -62,6 +77,14 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: Integración M03 distribuida y cobertura
+        run: |
+          docker compose --profile test up -d --build postgres identity-service catalog-service
+          docker compose --profile test run --rm --build commerce-test sh -c \
+            'npm run db:deploy --workspace @spectra/commerce-service && npm run test:cov --workspace @spectra/commerce-service'
+      - name: Cerrar integración distribuida
+        if: always()
+        run: docker compose --profile test down --volumes
       - run: npm run build
 
   secrets:

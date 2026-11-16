@@ -58,3 +58,46 @@ export interface LoginResponse {
   readonly user: AuthUser;
   readonly returnTo: string;
 }
+
+export interface CatalogCartSnapshot {
+  readonly id: string;
+  readonly name: string;
+  readonly price: string;
+  readonly stock: number;
+  readonly isActive: boolean;
+}
+
+export interface CatalogCartSnapshotResponse {
+  readonly products: readonly CatalogCartSnapshot[];
+}
+
+export interface ValidatedSession {
+  readonly userId: string;
+  readonly sessionId: string;
+  readonly role: UserRole;
+}
+
+export type CartStatus = 'ACTIVO' | 'CONVERTIDO';
+
+export interface CartLine {
+  readonly id: string;
+  readonly productId: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPrice: string;
+  readonly subtotal: string;
+  readonly available: boolean;
+  readonly unavailableReason?: 'INACTIVE' | 'OUT_OF_STOCK' | 'INSUFFICIENT_STOCK';
+}
+
+export interface ShoppingCart {
+  readonly id: string;
+  readonly status: CartStatus;
+  readonly items: readonly CartLine[];
+  readonly itemCount: number;
+  readonly distinctItems: number;
+  readonly total: string;
+  readonly currency: 'GTQ';
+  readonly checkoutAllowed: boolean;
+  readonly updatedAt: string;
+}

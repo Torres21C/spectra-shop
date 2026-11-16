@@ -164,6 +164,17 @@ const products = [
     imageKey: 'keyboard',
     isActive: false,
   },
+  {
+    id: '20000000-0000-4000-8000-000000000015',
+    categoryId: categories[2].id,
+    sku: 'SP-ORG-001',
+    name: 'Organizador Lumen',
+    description: 'Organizador modular de escritorio usado en las pruebas sintéticas de carrito.',
+    price: '325.00',
+    stock: 10,
+    imageKey: 'organizer',
+    isActive: true,
+  },
 ] as const;
 
 async function seed(): Promise<void> {

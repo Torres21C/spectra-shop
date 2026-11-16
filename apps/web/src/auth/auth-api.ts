@@ -63,7 +63,7 @@ async function parseResponse(response: Response): Promise<unknown> {
   return payload;
 }
 
-async function csrfToken(): Promise<string> {
+export async function csrfToken(): Promise<string> {
   const response = await fetch(`${IDENTITY_BASE_URL}/auth/csrf`, {
     method: 'GET',
     credentials: 'include',
@@ -121,6 +121,10 @@ export async function login(input: {
 
 export async function logout(): Promise<void> {
   await mutate('/auth/logout');
+}
+
+export async function refreshSession(): Promise<void> {
+  await mutate('/auth/refresh');
 }
 
 export async function getMe(signal?: AbortSignal): Promise<AuthUser | undefined> {

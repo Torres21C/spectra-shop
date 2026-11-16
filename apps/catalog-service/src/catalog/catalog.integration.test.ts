@@ -38,13 +38,13 @@ describe.skipIf(!process.env.DATABASE_URL)('catalog HTTP integration with Postgr
     const body = parseJson<ProductPage>(response.text);
     expect(body.items).toHaveLength(12);
     expect(body.items.some((product) => product.name === 'Teclado Legacy')).toBe(false);
-    expect(body.meta).toMatchObject({ page: 1, pageSize: 12, totalItems: 13, totalPages: 2 });
+    expect(body.meta).toMatchObject({ page: 1, pageSize: 12, totalItems: 14, totalPages: 2 });
 
     const secondPageResponse = await supertest(server)
       .get('/products')
       .query({ page: 2 })
       .expect(200);
-    expect(parseJson<ProductPage>(secondPageResponse.text).items).toHaveLength(1);
+    expect(parseJson<ProductPage>(secondPageResponse.text).items).toHaveLength(2);
   });
 
   it('CA-M01-02 searches case-insensitively in product text', async () => {

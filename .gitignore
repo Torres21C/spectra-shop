@@ -19,6 +19,7 @@ coverage/
 *.db-journal
 prisma/dev.db
 apps/identity-service/src/generated/
+apps/commerce-service/src/generated/
 
 # Logs and reports
 *.log

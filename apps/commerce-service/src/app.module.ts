@@ -1,5 +1,26 @@
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { CartModule } from './cart/cart.module.js';
+import { RequestContextMiddleware } from './common/request-context.js';
+import { SafeExceptionFilter } from './common/safe-exception.filter.js';
+import { DatabaseModule } from './database/database.module.js';
 import { HealthController } from './health.controller.js';
 
-@Module({ controllers: [HealthController] })
-export class AppModule {}
+@Module({
+  imports: [
+    ThrottlerModule.forRoot([{ name: 'commerce', ttl: 60_000, limit: 120 }]),
+    DatabaseModule,
+    CartModule,
+  ],
+  controllers: [HealthController],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: SafeExceptionFilter },
+  ],
+})
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestContextMiddleware).forRoutes('*');
+  }
+}

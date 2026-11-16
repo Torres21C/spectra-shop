@@ -6,8 +6,10 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { identityConfig } from './config/identity.config.js';
+import { InternalAppModule } from './internal-app.module.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
+const internalPort = Number.parseInt(process.env.INTERNAL_PORT ?? '3101', 10);
 const app = await NestFactory.create<NestExpressApplication>(AppModule);
 app.getHttpAdapter().getInstance().disable('x-powered-by');
 app.useBodyParser('json', { limit: '16kb' });
@@ -46,4 +48,15 @@ SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig
   jsonDocumentUrl: 'docs-json',
 });
 app.enableShutdownHooks();
-await app.listen(port, '0.0.0.0');
+
+const internalApp = await NestFactory.create<NestExpressApplication>(InternalAppModule);
+internalApp.getHttpAdapter().getInstance().disable('x-powered-by');
+internalApp.useBodyParser('json', { limit: '4kb' });
+internalApp.use(
+  helmet({
+    contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+  }),
+);
+internalApp.enableShutdownHooks();
+
+await Promise.all([app.listen(port, '0.0.0.0'), internalApp.listen(internalPort, '0.0.0.0')]);

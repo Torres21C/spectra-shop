@@ -1,4 +1,7 @@
 import type { ProductSummary } from '@spectra/contracts';
+import { useState } from 'react';
+import { useAuth } from '../auth/AuthContext.js';
+import { useCart } from '../cart/CartContext.js';
 
 const GLYPHS: Readonly<Record<string, string>> = {
   keyboard: '⌨',
@@ -31,6 +34,30 @@ export function formatPrice(price: string): string {
 }
 
 export function ProductCard({ product }: { product: ProductSummary }) {
+  const { user } = useAuth();
+  const { add } = useCart();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const exhausted = product.availability === 'OUT_OF_STOCK';
+
+  async function addOne(): Promise<void> {
+    if (!user) {
+      window.location.hash = `/login?returnTo=${encodeURIComponent(`#/producto/${product.id}`)}`;
+      return;
+    }
+    if (user.role !== 'CLIENTE') return;
+    setBusy(true);
+    setMessage('');
+    try {
+      await add(product.id, 1);
+      setMessage('Agregado al carrito');
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : 'No fue posible agregar el producto');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <article className="product-card">
       <a className="product-link" href={`#/producto/${encodeURIComponent(product.id)}`}>
@@ -53,6 +80,19 @@ export function ProductCard({ product }: { product: ProductSummary }) {
           <strong>{formatPrice(product.price)}</strong>
         </div>
       </a>
+      {!exhausted && user?.role !== 'ADMIN' && (
+        <div className="card-actions">
+          <button
+            className="primary-button"
+            disabled={busy}
+            type="button"
+            onClick={() => void addOne()}
+          >
+            {busy ? 'Agregando…' : 'Agregar al carrito'}
+          </button>
+          {message && <small role="status">{message}</small>}
+        </div>
+      )}
     </article>
   );
 }

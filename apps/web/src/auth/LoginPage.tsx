@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { login, safeClientReturn } from './auth-api.js';
 import { useAuth } from './AuthContext.js';
 
-export function LoginPage() {
+export function LoginPage({ returnTo = '#/pedidos' }: { returnTo?: string }) {
   const { setUser } = useAuth();
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -16,7 +16,7 @@ export function LoginPage() {
       const result = await login({
         email: typeof data.get('email') === 'string' ? (data.get('email') as string) : '',
         password: typeof data.get('password') === 'string' ? (data.get('password') as string) : '',
-        returnTo: '#/pedidos',
+        returnTo: safeClientReturn(returnTo),
       });
       setUser(result.user);
       window.location.hash = safeClientReturn(result.returnTo).slice(1);

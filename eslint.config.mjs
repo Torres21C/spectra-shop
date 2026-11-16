@@ -12,6 +12,7 @@ export default tseslint.config(
       '**/src/generated/**',
       'reports/**',
       'eslint.config.mjs',
+      '**/vitest.config.*',
       'security/semgrep/*.ts',
       'security/semgrep/*.tsx',
     ],

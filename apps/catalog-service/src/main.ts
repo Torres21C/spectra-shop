@@ -4,8 +4,10 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
+import { InternalAppModule } from './internal-app.module.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3002', 10);
+const internalPort = Number.parseInt(process.env.INTERNAL_PORT ?? '3102', 10);
 const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
 app.getHttpAdapter().getInstance().disable('x-powered-by');
@@ -54,4 +56,23 @@ SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig
 });
 
 app.enableShutdownHooks();
-await app.listen(port, '0.0.0.0');
+
+const internalApp = await NestFactory.create<NestExpressApplication>(InternalAppModule);
+internalApp.getHttpAdapter().getInstance().disable('x-powered-by');
+internalApp.useBodyParser('json', { limit: '16kb' });
+internalApp.use(
+  helmet({
+    contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+  }),
+);
+internalApp.useGlobalPipes(
+  new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+    stopAtFirstError: true,
+  }),
+);
+internalApp.enableShutdownHooks();
+
+await Promise.all([app.listen(port, '0.0.0.0'), internalApp.listen(internalPort, '0.0.0.0')]);
