@@ -39,8 +39,10 @@ app.useGlobalPipes(
 );
 const openApiConfig = new DocumentBuilder()
   .setTitle('SPECTRA Shop — Commerce')
-  .setDescription('API M03 Carrito y M04 Checkout con pago simulado (sin datos de tarjeta)')
-  .setVersion('1.1.0')
+  .setDescription(
+    'API M03 Carrito, M04 Checkout con pago simulado (sin datos de tarjeta) y M05 Pedidos del cliente',
+  )
+  .setVersion('1.2.0')
   .addCookieAuth('spectra-access', { type: 'apiKey', in: 'cookie' }, 'access-cookie')
   .build();
 SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig), {

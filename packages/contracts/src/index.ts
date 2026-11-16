@@ -216,6 +216,44 @@ export interface OrderConfirmation {
   readonly shipping: ShippingDetails;
 }
 
+/** M05: un hito de la línea de tiempo del pedido (D-M05-01: una columna de fecha por estado). */
+export interface OrderTimelineEntry {
+  readonly status: OrderStatus;
+  readonly at: string;
+}
+
+/**
+ * M05 detalle (RF-027, RF-028): amplía la confirmación de M04 sin romperla. `statusChangedAt` es la
+ * fecha del estado vigente, es decir, del último cambio registrado (CA-M05-04).
+ */
+export interface OrderDetail extends OrderConfirmation {
+  readonly statusChangedAt: string;
+  readonly timeline: readonly OrderTimelineEntry[];
+}
+
+/** M05 historial (RF-026): sin datos de entrega ni referencia de pago (minimización). */
+export interface OrderSummary {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly status: OrderStatus;
+  readonly statusChangedAt: string;
+  readonly createdAt: string;
+  readonly itemCount: number;
+  readonly total: string;
+  readonly currency: 'GTQ';
+}
+
+/** Página del historial; el tamaño (10) lo fija el servidor (D-M05-04). */
+export interface OrderHistoryPage {
+  readonly items: readonly OrderSummary[];
+  readonly meta: {
+    readonly page: number;
+    readonly pageSize: number;
+    readonly totalItems: number;
+    readonly totalPages: number;
+  };
+}
+
 /** Lista cerrada de los 22 departamentos (ERS §2.4); cada servicio mantiene su copia en tiempo de ejecución. */
 export type GuatemalaDepartment =
   | 'Alta Verapaz'

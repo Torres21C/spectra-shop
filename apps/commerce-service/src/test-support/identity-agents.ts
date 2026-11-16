@@ -4,7 +4,10 @@ import { importPKCS8, SignJWT } from 'jose';
 import type { Pool } from 'pg';
 
 export const ORIGIN = 'http://127.0.0.1:5173';
-const CLIENT_ROLE_ID = '10000000-0000-4000-8000-000000000001';
+const ROLE_IDS = {
+  CLIENTE: '10000000-0000-4000-8000-000000000001',
+  ADMIN: '10000000-0000-4000-8000-000000000002',
+} as const;
 
 /** Comprador usado por las pruebas: cookies de sesión + token CSRF double-submit. */
 export interface Buyer {
@@ -109,6 +112,7 @@ export class SyntheticBuyer implements Buyer {
     identityDb: Pool,
     privateKeyPem: string,
     cookieNames: { access: string; csrf: string },
+    role: keyof typeof ROLE_IDS = 'CLIENTE',
   ): Promise<SyntheticBuyer> {
     const userId = randomUUID();
     const sessionId = randomUUID();
@@ -118,7 +122,7 @@ export class SyntheticBuyer implements Buyer {
        VALUES ($1, $2, $3, $4, $5, now())`,
       [
         userId,
-        CLIENT_ROLE_ID,
+        ROLE_IDS[role],
         'Comprador concurrente sintético',
         `concurrente.${userId.slice(0, 8)}@example.test`,
         'login-disabled-synthetic-buyer',
@@ -130,7 +134,7 @@ export class SyntheticBuyer implements Buyer {
       [sessionId, userId],
     );
     const key = await importPKCS8(privateKeyPem, 'ES256');
-    const token = await new SignJWT({ role: 'CLIENTE', sid: sessionId })
+    const token = await new SignJWT({ role, sid: sessionId })
       .setProtectedHeader({ alg: 'ES256', typ: 'JWT', kid: 'spectra-dev-1' })
       .setSubject(userId)
       .setJti(randomUUID())
