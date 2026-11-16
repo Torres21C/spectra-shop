@@ -12,7 +12,7 @@ RUN npm ci --ignore-scripts
 COPY tsconfig.base.json ./
 COPY apps/commerce-service apps/commerce-service
 COPY packages/contracts packages/contracts
-RUN npm run build --workspace @spectra/contracts && npm run build --workspace @spectra/commerce-service
+RUN npm run prisma:generate --workspace @spectra/commerce-service && npm run build --workspace @spectra/contracts && npm run build --workspace @spectra/commerce-service
 
 FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944
 ENV NODE_ENV=production
@@ -20,5 +20,7 @@ WORKDIR /app
 USER node
 COPY --from=build --chown=node:node /workspace/node_modules /app/node_modules
 COPY --from=build --chown=node:node /workspace/apps/commerce-service/dist /app/dist
+COPY --from=build --chown=node:node /workspace/apps/commerce-service/prisma /app/prisma
+COPY --from=build --chown=node:node /workspace/apps/commerce-service/src/generated/commerce-client /app/dist/generated/commerce-client
 EXPOSE 3003
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && node dist/main.js"]

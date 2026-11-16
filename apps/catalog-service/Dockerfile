@@ -19,7 +19,6 @@ ENV NODE_ENV=production
 WORKDIR /app
 USER node
 COPY --from=build --chown=node:node /workspace/node_modules /app/node_modules
-COPY --from=build --chown=node:node /workspace/apps/catalog-service/node_modules /app/node_modules
 COPY --from=build --chown=node:node /workspace/apps/catalog-service/dist /app/dist
 COPY --from=build --chown=node:node /workspace/apps/catalog-service/prisma /app/prisma
 EXPOSE 3002

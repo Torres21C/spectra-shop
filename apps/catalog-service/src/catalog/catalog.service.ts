@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import type {
+  CatalogCartSnapshotResponse,
   CategorySummary,
   ProductDetail,
   ProductPage,
@@ -84,6 +85,22 @@ export class CatalogService {
     }
 
     return { ...this.toSummary(product), sku: product.sku };
+  }
+
+  async cartSnapshot(productIds: readonly string[]): Promise<CatalogCartSnapshotResponse> {
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: [...productIds] } },
+      include: { category: { select: { isActive: true } } },
+    });
+    return {
+      products: products.map((product) => ({
+        id: product.id,
+        name: product.name,
+        price: product.price.toFixed(2),
+        stock: product.stock,
+        isActive: product.isActive && product.category.isActive,
+      })),
+    };
   }
 
   private toSummary(product: ProductWithCategory): ProductSummary {
