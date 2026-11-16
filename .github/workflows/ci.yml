@@ -64,10 +64,14 @@ jobs:
           chmod 644 "$keys_dir/public.pem"
           sudo chown 1000:1000 "$keys_dir/private.pem" "$keys_dir/public.pem"
           internal_token="$(openssl rand -hex 32)"
+          inventory_token="$(openssl rand -hex 32)"
           echo "::add-mask::$internal_token"
+          echo "::add-mask::$inventory_token"
           echo "SPECTRA_KEYS_DIR=$keys_dir" >> "$GITHUB_ENV"
           echo "SPECTRA_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
           echo "SPECTRA_INTERNAL_TOKENS=$internal_token" >> "$GITHUB_ENV"
+          echo "CATALOG_INVENTORY_TOKEN=$inventory_token" >> "$GITHUB_ENV"
+          echo "CATALOG_INVENTORY_TOKENS=$inventory_token" >> "$GITHUB_ENV"
       - name: Preparar PostgreSQL de integración
         run: |
           npm run prisma:generate --workspace @spectra/catalog-service
@@ -81,7 +85,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - name: Integración M03 distribuida y cobertura
+      - name: Integración M03/M04 distribuida y cobertura
         run: |
           docker compose --profile test up -d --build --wait postgres identity-service catalog-service
           docker compose --profile test build commerce-test
