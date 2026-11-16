@@ -60,7 +60,9 @@ jobs:
           mkdir -p "$keys_dir"
           openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$keys_dir/private.pem"
           openssl pkey -in "$keys_dir/private.pem" -pubout -out "$keys_dir/public.pem"
+          sudo chown 1000:1000 "$keys_dir/private.pem" "$keys_dir/public.pem"
           chmod 600 "$keys_dir/private.pem"
+          chmod 644 "$keys_dir/public.pem"
           internal_token="$(openssl rand -hex 32)"
           echo "::add-mask::$internal_token"
           echo "SPECTRA_KEYS_DIR=$keys_dir" >> "$GITHUB_ENV"
@@ -81,8 +83,9 @@ jobs:
       - run: npm test
       - name: Integración M03 distribuida y cobertura
         run: |
-          docker compose --profile test up -d --build postgres identity-service catalog-service
-          docker compose --profile test run --rm --build commerce-test sh -c \
+          docker compose --profile test up -d --build --wait postgres identity-service catalog-service
+          docker compose --profile test build commerce-test
+          docker compose --profile test run --rm --no-deps commerce-test sh -c \
             'npm run db:deploy --workspace @spectra/commerce-service && npm run test:cov --workspace @spectra/commerce-service'
       - name: Cerrar integración distribuida
         if: always()
