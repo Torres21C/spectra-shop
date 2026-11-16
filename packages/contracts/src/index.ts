@@ -43,3 +43,18 @@ export interface ApiErrorResponse {
   readonly requestId: string;
   readonly timestamp: string;
 }
+
+export type UserRole = 'CLIENTE' | 'ADMIN';
+
+export interface AuthUser {
+  readonly id: string;
+  readonly fullName: string;
+  readonly email: string;
+  readonly role: UserRole;
+  readonly createdAt: string;
+}
+
+export interface LoginResponse {
+  readonly user: AuthUser;
+  readonly returnTo: string;
+}

@@ -9,6 +9,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/coverage/**',
       '**/node_modules/**',
+      '**/src/generated/**',
       'reports/**',
       'eslint.config.mjs',
       'security/semgrep/*.ts',
