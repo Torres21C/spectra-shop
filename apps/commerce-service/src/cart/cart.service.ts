@@ -1,13 +1,13 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CatalogCartSnapshot, CartLine, ShoppingCart } from '@spectra/contracts';
-import { Decimal } from 'decimal.js';
 import type { Cart, CartItem, Prisma } from '../generated/commerce-client/index.js';
 import { CatalogClientService } from '../catalog/catalog-client.service.js';
+import { evaluateLine, money, ZERO } from '../common/pricing.js';
 import { PrismaService } from '../database/prisma.service.js';
 import type { AddCartItemDto, UpdateCartItemDto } from './cart.dto.js';
 
 const MAX_LINES = 20;
-const ZERO = new Decimal(0);
+const INFLIGHT_STATES = ['STARTED', 'RESERVED', 'CONFIRMED'] as const;
 
 type CartWithItems = Cart & { items: CartItem[] };
 
@@ -144,18 +144,7 @@ export class CartService {
     let total = ZERO;
     const items: CartLine[] = cart.items.map((item) => {
       const product = byId.get(item.productId);
-      const reason =
-        !product || !product.isActive
-          ? ('INACTIVE' as const)
-          : product.stock === 0
-            ? ('OUT_OF_STOCK' as const)
-            : product.stock < item.quantity
-              ? ('INSUFFICIENT_STOCK' as const)
-              : undefined;
-      const unit = new Decimal(product?.price ?? '0.00');
-      const subtotal = reason
-        ? ZERO
-        : unit.mul(item.quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      const { unitPrice: unit, subtotal, reason } = evaluateLine(product, item.quantity);
       if (!reason) total = total.add(subtotal);
       return {
         id: item.id,
@@ -174,7 +163,7 @@ export class CartService {
       items,
       itemCount: cart.items.reduce((sum, item) => sum + item.quantity, 0),
       distinctItems: cart.items.length,
-      total: total.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2),
+      total: money(total).toFixed(2),
       currency: 'GTQ',
       checkoutAllowed: items.length > 0 && items.every((item) => item.available),
       updatedAt: cart.updatedAt.toISOString(),
@@ -196,8 +185,21 @@ export class CartService {
     }
   }
 
-  private lockCart(transaction: Prisma.TransactionClient, cartId: string): Promise<number> {
-    return transaction.$executeRaw`SELECT 1 FROM "commerce"."carts" WHERE "id" = ${cartId}::uuid FOR UPDATE`;
+  /**
+   * Bloquea la fila del carrito y rechaza mutaciones mientras un checkout está en curso (M04):
+   * las líneas del pedido se toman del intento, por lo que el carrito queda congelado.
+   */
+  private async lockCart(transaction: Prisma.TransactionClient, cartId: string): Promise<void> {
+    await transaction.$executeRaw`SELECT 1 FROM "commerce"."carts" WHERE "id" = ${cartId}::uuid FOR UPDATE`;
+    const inflight = await transaction.checkoutAttempt.count({
+      where: { cartId, state: { in: [...INFLIGHT_STATES] } },
+    });
+    if (inflight > 0) {
+      throw new ConflictException({
+        code: 'CART_LOCKED_FOR_CHECKOUT',
+        message: 'El carrito tiene un checkout en curso',
+      });
+    }
   }
 
   private isUniqueConflict(error: unknown): boolean {

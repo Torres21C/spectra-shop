@@ -24,7 +24,7 @@ app.enableCors({
     else callback(null, false);
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Request-Id'],
+  allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Request-Id', 'Idempotency-Key'],
   exposedHeaders: ['X-Request-Id'],
   credentials: true,
   maxAge: 600,
@@ -38,9 +38,9 @@ app.useGlobalPipes(
   }),
 );
 const openApiConfig = new DocumentBuilder()
-  .setTitle('SPECTRA Shop — Carrito')
-  .setDescription('API M03 para el carrito persistente del cliente')
-  .setVersion('1.0.0')
+  .setTitle('SPECTRA Shop — Commerce')
+  .setDescription('API M03 Carrito y M04 Checkout con pago simulado (sin datos de tarjeta)')
+  .setVersion('1.1.0')
   .addCookieAuth('spectra-access', { type: 'apiKey', in: 'cookie' }, 'access-cookie')
   .build();
 SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig), {

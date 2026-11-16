@@ -27,15 +27,44 @@ if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 5000) {
   throw new Error('INTERNAL_HTTP_TIMEOUT_MS debe estar entre 100 y 5000');
 }
 
+function integerEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  const value = raw === undefined ? fallback : Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} debe ser un entero entre ${min} y ${max}`);
+  }
+  return value;
+}
+
 export const commerceConfig = {
   catalogUrl: internalUrl('CATALOG_INTERNAL_URL', 'http://catalog-service:3002'),
   identityUrl: internalUrl('IDENTITY_INTERNAL_URL', 'http://identity-service:3001'),
   internalToken: required('SPECTRA_INTERNAL_TOKEN'),
+  /** Token de alcance de inventario (M04); distinto del token compartido de lectura. */
+  inventoryToken: (() => {
+    const token = required('CATALOG_INVENTORY_TOKEN');
+    if (token.length < 32 || token === process.env.SPECTRA_INTERNAL_TOKEN?.trim()) {
+      throw new Error(
+        'CATALOG_INVENTORY_TOKEN debe tener 32+ caracteres y diferir del token compartido',
+      );
+    }
+    return token;
+  })(),
   publicKeyPath: required('IDENTITY_PUBLIC_KEY_PATH'),
   issuer: process.env.JWT_ISSUER ?? 'spectra-shop-identity',
   audience: process.env.JWT_AUDIENCE ?? 'spectra-shop-services',
   cookieSecure: booleanEnv('COOKIE_SECURE', process.env.NODE_ENV === 'production'),
   timeoutMs,
+  /** Duración del arrendamiento de un intento de checkout por un proceso Commerce. */
+  checkoutLeaseMs: integerEnv('CHECKOUT_LEASE_MS', 30_000, 1_000, 300_000),
+  /** Intervalo del reconciliador de sagas; 0 lo limita al arranque. */
+  recoveryIntervalMs: integerEnv('CHECKOUT_RECOVERY_INTERVAL_MS', 15_000, 0, 600_000),
+  recoveryBatchSize: 20,
+  /** Espera máxima de una petición duplicada concurrente antes de responder 409 en curso. */
+  duplicateWaitMs: integerEnv('CHECKOUT_DUPLICATE_WAIT_MS', 5_000, 0, 30_000),
+  /** RS10: intentos nuevos de checkout por cuenta y minuto. */
+  checkoutAttemptsPerMinute: integerEnv('CHECKOUT_ATTEMPTS_PER_MINUTE', 10, 1, 120),
+  idempotencyTtlMs: 24 * 60 * 60 * 1000,
   allowedOrigins: new Set(
     (process.env.CORS_ORIGINS ?? 'http://127.0.0.1:5173,http://localhost:5173')
       .split(',')
