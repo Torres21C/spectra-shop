@@ -6,18 +6,32 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { commerceConfig } from '../config/commerce.config.js';
-import { CheckoutService, type ReconcileResult } from './checkout.service.js';
+import { CheckoutService, type ReconcileResult, type SagaMetrics } from './checkout.service.js';
+
+export interface RecoveryRunReport {
+  readonly outcomes: Record<ReconcileResult, number>;
+  readonly newlyStuck: readonly string[];
+  readonly metrics: SagaMetrics | undefined;
+}
 
 /**
- * Reconciliador de sagas pendientes (D-M04-06). Se ejecuta al arrancar Commerce —recuperación tras
- * reinicio— y periódicamente. Solo toma intentos con arrendamiento vencido, así que puede correr en
- * varias réplicas sin duplicar efectos.
+ * Reconciliador de sagas pendientes (D-M04-06, reforzado en M04.1). Se ejecuta al arrancar Commerce
+ * —recuperación tras reinicio— y periódicamente. Solo toma intentos con arrendamiento vencido y cuyo
+ * backoff terminó, así que puede correr en varias réplicas sin duplicar efectos. Cada ciclo detecta
+ * sagas atascadas y publica métricas estructuradas (`checkout_saga_metrics`).
  */
 @Injectable()
 export class CheckoutRecoveryService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger(CheckoutRecoveryService.name);
   private timer: NodeJS.Timeout | undefined;
   private running = false;
+  /** Contadores acumulados del proceso (complementan las métricas calculadas desde la BD). */
+  private readonly totals: Record<ReconcileResult, number> = {
+    SKIPPED: 0,
+    COMPLETED: 0,
+    ABORTED: 0,
+    DEFERRED: 0,
+  };
 
   constructor(private readonly checkout: CheckoutService) {}
 
@@ -33,37 +47,39 @@ export class CheckoutRecoveryService implements OnApplicationBootstrap, OnApplic
     if (this.timer) clearInterval(this.timer);
   }
 
-  async runOnce(): Promise<Record<ReconcileResult, number>> {
-    const summary: Record<ReconcileResult, number> = {
+  async runOnce(): Promise<RecoveryRunReport> {
+    const outcomes: Record<ReconcileResult, number> = {
       SKIPPED: 0,
       COMPLETED: 0,
       ABORTED: 0,
       DEFERRED: 0,
     };
-    if (this.running) return summary;
+    if (this.running) return { outcomes, newlyStuck: [], metrics: undefined };
     this.running = true;
     try {
       const ids = await this.checkout.staleAttempts(commerceConfig.recoveryBatchSize);
       for (const id of ids) {
-        try {
-          summary[await this.checkout.reconcile(id, randomUUID())] += 1;
-        } catch (error: unknown) {
-          summary.DEFERRED += 1;
-          this.logger.error({
-            event: 'checkout_recovery_failed',
-            attemptId: id,
-            errorType: error instanceof Error ? error.name : 'UnknownError',
-          });
-        }
+        const result = await this.checkout.reconcile(id, randomUUID());
+        outcomes[result] += 1;
+        this.totals[result] += 1;
       }
-      if (ids.length > 0) this.logger.log({ event: 'checkout_recovery_run', ...summary });
-      return summary;
+      const newlyStuck = await this.checkout.detectStuck();
+      const metrics = await this.checkout.sagaMetrics();
+      const report = {
+        event: 'checkout_saga_metrics',
+        ...metrics,
+        run: outcomes,
+        totals: this.totals,
+      };
+      if (metrics.stuck > 0) this.logger.error(report);
+      else if (metrics.inflightTotal > 0 || ids.length > 0) this.logger.log(report);
+      return { outcomes, newlyStuck, metrics };
     } catch (error: unknown) {
       this.logger.error({
         event: 'checkout_recovery_unavailable',
         errorType: error instanceof Error ? error.name : 'UnknownError',
       });
-      return summary;
+      return { outcomes, newlyStuck: [], metrics: undefined };
     } finally {
       this.running = false;
     }

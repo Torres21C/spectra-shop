@@ -3,7 +3,13 @@ import type { Prisma } from '../generated/commerce-client/index.js';
 import { PrismaService } from '../database/prisma.service.js';
 
 export type AuditEventType =
-  'ORDER_CREATED' | 'PAYMENT_SIMULATED_REJECTED' | 'CHECKOUT_STOCK_CONFLICT' | 'ACCESS_DENIED';
+  | 'ORDER_CREATED'
+  | 'PAYMENT_SIMULATED_REJECTED'
+  | 'CHECKOUT_STOCK_CONFLICT'
+  | 'ACCESS_DENIED'
+  /** M04.1: alerta técnica de operación (saga atascada) y su resolución. */
+  | 'CHECKOUT_SAGA_STUCK'
+  | 'CHECKOUT_SAGA_RECOVERED';
 
 export interface AuditActor {
   readonly userId: string;
