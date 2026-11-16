@@ -192,8 +192,136 @@ a {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.orders-placeholder {
-  padding-top: 1rem;
+
+/* M05 · P07 Mi cuenta, historial y detalle de pedidos */
+.account-layout {
+  max-width: 1320px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.profile-card,
+.orders-panel {
+  padding: 1.6rem;
+  background: #fffdf8;
+  border: 1px solid #ded8cd;
+  border-radius: 18px;
+}
+.profile-card h1 {
+  margin: 0.4rem 0 0;
+  font:
+    700 2rem/1.1 Georgia,
+    serif;
+  overflow-wrap: anywhere;
+}
+.orders-panel .section-heading h2 {
+  margin: 0;
+}
+.order-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.order-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 1.25rem;
+  align-items: center;
+  padding: 1rem 1.2rem;
+  border: 1px solid #ded8cd;
+  border-radius: 14px;
+  text-decoration: none;
+}
+.order-row:hover,
+.order-row:focus-visible {
+  border-color: #258d77;
+  background: #f7f4ed;
+}
+.order-row-main {
+  display: grid;
+  gap: 0.2rem;
+}
+.order-row-main small {
+  color: #687589;
+}
+.order-badge {
+  display: inline-block;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.order-badge-pagado {
+  background: #e3f0f8;
+  color: #0b6aa2;
+}
+.order-badge-en_preparacion {
+  background: #fbf0df;
+  color: #a35a00;
+}
+.order-badge-enviado {
+  background: #ecebfd;
+  color: #4f46e5;
+}
+.order-badge-entregado {
+  background: #e3f3e8;
+  color: #15803d;
+}
+.order-badge-cancelado {
+  background: #fbe7e9;
+  color: #c02637;
+}
+.pagination-link {
+  padding: 0.6rem 1rem;
+  border: 1px solid #cfc7bb;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 700;
+}
+.pagination-link[aria-disabled='true'] {
+  opacity: 0.45;
+}
+.order-current-status {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+  color: #526074;
+}
+.timeline-card {
+  grid-template-columns: 1fr;
+}
+.order-timeline {
+  display: grid;
+  gap: 0.9rem;
+  margin: 1rem 0 0;
+  padding: 0 0 0 1.2rem;
+  border-left: 2px solid #ded8cd;
+  list-style: none;
+}
+.order-timeline li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+.order-timeline li[aria-current='step'] .order-badge {
+  outline: 2px solid currentColor;
+}
+.order-timeline time {
+  color: #526074;
+}
+@media (max-width: 900px) {
+  .account-layout {
+    grid-template-columns: 1fr;
+  }
+  .order-row {
+    grid-template-columns: 1fr auto;
+  }
 }
 
 main {
