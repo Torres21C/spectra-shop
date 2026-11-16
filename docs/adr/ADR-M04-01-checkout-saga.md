@@ -20,7 +20,7 @@ La ERS (RN-16, RF-023, RS12, CTL-18) pide que la creación del pedido, el descue
 3. **D-M04-03.** El pago es un simulador interno. No existen campos, columnas ni payloads de tarjeta; el DTO en lista blanca los rechaza con 400.
 4. **D-M04-04.** La `Idempotency-Key` es un UUID v4 único por usuario (índice único permanente) y válido durante 24 h. Un reenvío con la misma clave y el mismo contenido devuelve el resultado guardado. Con otro contenido responde `422 IDEMPOTENCY_KEY_REUSED`, y pasadas las 24 h, `422 IDEMPOTENCY_KEY_EXPIRED`. `orders` conserva además el índice único (`user_id`, `idempotency_key`).
 5. **D-M04-05.** Los estados técnicos (`checkout_attempts.state`: `STARTED`, `RESERVED`, `CONFIRMED`, `COMPLETED`, `REJECTED`, `FAILED`, `ABORTED`) están separados de los estados de negocio (`orders.status`: `PAGADO` … `CANCELADO`).
-6. **D-M04-06.** Recuperación:
+6. **D-M04-06.** Recuperación (reforzada en M04.1: backoff exponencial acotado, detección de sagas atascadas por antigüedad o reintentos, alerta única y métricas):
    - **Arrendamiento:** cada intento tiene `lease_owner` y `lease_until`. Las transiciones son condicionales sobre el dueño del arrendamiento.
    - **Reconciliador de Commerce:** corre al arrancar y periódicamente. Si Catalog no confirmó, libera la reserva (hacia atrás → `ABORTED`); si ya confirmó, completa C3 (hacia adelante → `COMPLETED`).
    - **Barrido de Catalog:** libera reservas `PENDING` vencidas. Es seguro porque una reserva vencida ya no puede confirmarse.
@@ -29,17 +29,36 @@ La ERS (RN-16, RF-023, RS12, CTL-18) pide que la creación del pedido, el descue
 
 ## Adaptación formal de RN-16
 
-| Aspecto            | RN-16 original                          | RN-16 adaptada (esta ADR)                                                                                     |
-| ------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Mecanismo          | Una transacción ACID global             | Saga de transacciones ACID locales con compensación idempotente                                               |
-| Pedido sin stock   | Imposible por rollback                  | Imposible: C3 solo se ejecuta tras K y K exige stock ya descontado                                            |
-| Stock sin pedido   | Imposible por rollback                  | Transitorio y acotado: la reserva se libera por compensación o vencimiento; nunca queda descontada sin pedido |
-| Carrito convertido | En la misma transacción que el pedido   | En la misma transacción local que el pedido (C3)                                                              |
-| Visibilidad        | El cliente nunca ve estados intermedios | El cliente nunca recibe éxito antes de C3; un fallo técnico responde `503 CHECKOUT_PENDING`                   |
-| Sobreventa         | Bloqueo de fila + `CHECK`               | `UPDATE` condicional + `CHECK stock >= 0` dentro de la transacción de Catalog                                 |
-| Consistencia       | Inmediata                               | Eventual y acotada (TTL de reserva de 120 s y arrendamiento de 30 s)                                          |
+| Aspecto            | RN-16 original                          | RN-16 adaptada (esta ADR)                                                                                                                                                                                                                                                     |
+| ------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mecanismo          | Una transacción ACID global             | Saga de transacciones ACID locales con compensación idempotente                                                                                                                                                                                                               |
+| Pedido sin stock   | Imposible por rollback                  | Imposible: C3 solo se ejecuta tras K y K exige stock ya descontado                                                                                                                                                                                                            |
+| Stock sin pedido   | Imposible por rollback                  | **Antes de K:** transitorio y acotado (la reserva se libera por compensación o vencimiento). **Después de K:** queda descontado hasta que Commerce complete C3; si Commerce no se recupera o pierde sus datos, el stock queda retenido sin pedido (ver «Garantías y límites») |
+| Carrito convertido | En la misma transacción que el pedido   | En la misma transacción local que el pedido (C3)                                                                                                                                                                                                                              |
+| Visibilidad        | El cliente nunca ve estados intermedios | El cliente nunca recibe éxito antes de C3; un fallo técnico responde `503 CHECKOUT_PENDING`                                                                                                                                                                                   |
+| Sobreventa         | Bloqueo de fila + `CHECK`               | `UPDATE` condicional + `CHECK stock >= 0` dentro de la transacción de Catalog                                                                                                                                                                                                 |
+| Consistencia       | Inmediata                               | Eventual: acotada antes de K (TTL de reserva de 120 s y arrendamiento de 30 s); después de K depende de que Commerce se recupere                                                                                                                                              |
 
 **Diferencia aceptada:** durante la saga, el catálogo puede mostrar stock reservado como no disponible antes de que exista el pedido, y si el proceso cae ese stock queda retenido hasta la compensación (fallo seguro: puede venderse de menos, nunca de más). Ningún criterio de aceptación CA-M04-01 a CA-M04-07 cambia.
+
+## Garantías y límites (corrección M04.1, aprobada C-02, 2026-11-16)
+
+La versión inicial de esta ADR afirmaba que el stock «nunca queda descontado sin pedido». La auditoría de cierre de M04 demostró que eso **no se cumple después del punto de no retorno K** si Commerce falla de forma permanente. Garantías verificadas:
+
+| Garantía                                                                   | Mecanismo                                                                                                                           | Verificación                                                   |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Sin pedidos duplicados                                                     | Únicos `orders(checkout_attempt_id)` y `(user_id, idempotency_key)` + arrendamiento con dueño                                       | PT14, 5 reconciliadores concurrentes, dos réplicas de Commerce |
+| Sin doble descuento de stock                                               | Reserva idempotente por id; reinicio solo tras `RELEASED`; liberación única                                                         | Integración M04 y M04.1                                        |
+| Sin sobreventa                                                             | `UPDATE` condicional + `CHECK stock >= 0`                                                                                           | 20 compradores / 5 unidades                                    |
+| Sin pedido sin stock confirmado                                            | C3 solo desde `CONFIRMED`                                                                                                           | Código y pruebas                                               |
+| Recuperación hacia adelante tras reinicio, con la base de Commerce intacta | Reconciliador al arrancar                                                                                                           | Reinicio en pruebas y contenedores                             |
+| Sin reintentos infinitos silenciosos (M04.1)                               | Backoff exponencial acotado, códigos de error en lista blanca, alerta única `CHECKOUT_SAGA_STUCK`, métricas `checkout_saga_metrics` | Suite `checkout-recovery`                                      |
+
+Límites que **no** están garantizados (riesgo residual R27, CTL-39 parcial):
+
+1. **Después de K, Commerce caído de forma permanente o con pérdida de datos:** la reserva `CONFIRMED` y el stock descontado quedan retenidos sin pedido. Catalog no lo detecta: no existe todavía la confirmación de entrega (FULFILLED). Pendiente DT-08, antes de M06.
+2. **Fallo persistente de C3:** la saga nunca se abandona ni se libera stock confirmado de forma automática. Se reintenta con backoff y se alerta; resolverla requiere intervención operativa (ver `docs/runbooks/checkout-sagas-atascadas.md`).
+3. **La recuperación depende de que alguna réplica de Commerce esté activa.** Las alertas son logs estructurados y eventos de outbox; sin alarmas cloud hasta la Fase 5.
 
 ## Discrepancias documentales resueltas
 

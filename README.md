@@ -145,12 +145,14 @@ Commerce orquesta la compra con transacciones ACID locales y sin acceder a tabla
 4. **K · Catalog**: confirmación, el punto de no retorno; rechaza reservas vencidas según el reloj de la base de datos.
 5. **C3 · Commerce**: pedido `PAGADO`, líneas con precio congelado, carrito `CONVERTIDO` y evento `ORDER_CREATED` en la outbox, todo en una transacción local.
 
-Compensación y recuperación: si la saga no llega a **K**, la reserva se libera de forma idempotente. Catalog libera además las reservas `PENDING` vencidas (barrido periódico y al arrancar). Commerce reconcilia al arrancar y periódicamente los intentos cuyo arrendamiento venció: hacia atrás si Catalog no confirmó, hacia adelante si ya confirmó. Los estados técnicos de la saga (`checkout_attempts.state`) están separados de los estados de negocio del pedido (`orders.status`).
+Compensación y recuperación: si la saga no llega a **K**, la reserva se libera de forma idempotente. Desde M04.1 el reconciliador reintenta con backoff exponencial acotado (`CHECKOUT_RECOVERY_BACKOFF_BASE_MS`/`_MAX_MS`), declara atascada una saga por antigüedad (`CHECKOUT_STUCK_AGE_MS`) o por reintentos (`CHECKOUT_STUCK_ATTEMPTS`), emite una única alerta `CHECKOUT_SAGA_STUCK` y publica métricas `checkout_saga_metrics` en cada ciclo. **Nunca abandona una saga ni libera stock confirmado después de K**; el procedimiento operativo está en [docs/runbooks/checkout-sagas-atascadas.md](docs/runbooks/checkout-sagas-atascadas.md). Catalog libera además las reservas `PENDING` vencidas (barrido periódico y al arrancar). Commerce reconcilia al arrancar y periódicamente los intentos cuyo arrendamiento venció: hacia atrás si Catalog no confirmó, hacia adelante si ya confirmó. Los estados técnicos de la saga (`checkout_attempts.state`) están separados de los estados de negocio del pedido (`orders.status`).
 
 Los endpoints internos de inventario (`/internal/catalog/stock-reservations`) existen solo en el listener `3102` y exigen `CATALOG_INVENTORY_TOKEN(S)`, distinto del token compartido de lectura.
 
 ### Límites de M04
 
+- Si Commerce falla de forma permanente o pierde sus datos **después de K**, el stock confirmado queda retenido sin pedido y Catalog todavía no lo detecta (R27, CTL-39 parcial; confirmación de entrega pendiente antes de M06). Ver «Garantías y límites» en la [ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md).
+- Todas las respuestas de Commerce envían `Cache-Control: no-store` y `Pragma: no-cache` (M04.1).
 - La entrega de la outbox a `audit-service` corresponde a M07; los eventos quedan persistidos en `commerce.outbox_events`.
 - Los servicios comparten un usuario PostgreSQL local; los roles por esquema siguen pendientes.
 - DAST/ZAP, TLS y controles AWS no están implementados. Completar M04 no completa las Fases 3 ni 4.
