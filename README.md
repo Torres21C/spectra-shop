@@ -4,14 +4,14 @@ Aplicación académica de comercio electrónico cloud-native. El código vive en
 
 ## Estado
 
-M01 Catálogo, M02 Identidad y M03 Carrito están integrados en `main`. El Incremento 4 se desarrolla en `feature/m04-checkout`: M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
+M01 Catálogo, M02 Identidad, M03 Carrito, M04 Checkout y su endurecimiento M04.1 están integrados en `main`. M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). El Incremento 5 se desarrolla en `feature/m05-orders`: M05 añade el historial, el detalle y la línea de tiempo de los pedidos propios del cliente ([ADR-M05-01](docs/adr/ADR-M05-01-gestion-pedidos.md)). No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
 
 ## Arquitectura
 
 - `apps/web`: React + Vite.
 - `apps/identity-service`: identidad y sesiones.
 - `apps/catalog-service`: catálogo e inventario.
-- `apps/commerce-service`: carrito, checkout simulado y pedidos.
+- `apps/commerce-service`: carrito, checkout simulado y pedidos (M03–M05).
 - `apps/audit-service`: auditoría append-only.
 - `packages/contracts`: contratos compartidos de transporte, sin lógica de dominio.
 
@@ -55,7 +55,8 @@ Una vez que los contenedores estén saludables:
 - OpenAPI JSON: <http://127.0.0.1:3002/docs-json>.
 - API de identidad: <http://127.0.0.1:3001/auth/csrf>;
 - Swagger de identidad: <http://127.0.0.1:3001/docs>.
-- API de carrito y checkout: <http://127.0.0.1:3003/cart>, <http://127.0.0.1:3003/checkout/summary>;
+- API de carrito, checkout y pedidos: <http://127.0.0.1:3003/cart>, <http://127.0.0.1:3003/checkout/summary>, <http://127.0.0.1:3003/orders>;
+- «Mis pedidos» (P07): <http://127.0.0.1:5173/#/pedidos>;
 - Swagger de Commerce: <http://127.0.0.1:3003/docs>.
 
 Las migraciones y seeds se ejecutan de forma idempotente al iniciar los servicios. PostgreSQL no publica su puerto al host. Las claves ES256 y la credencial interna se suministran desde rutas o variables locales no versionadas. Los listeners internos de Catalog (`3102`) e Identity (`3101`) sólo existen en la red privada de Compose y no se publican al host.
@@ -115,11 +116,11 @@ La comunicación interna usa un token aleatorio de al menos 32 caracteres compar
 
 ## API M04
 
-| Método | Ruta                | Función                                                                  |
-| ------ | ------------------- | ------------------------------------------------------------------------ |
-| `GET`  | `/checkout/summary` | Resumen recalculado en servidor y huella (`fingerprint`) del resumen     |
-| `POST` | `/orders`           | Confirma el pedido con pago simulado; exige `Idempotency-Key` (UUID v4)  |
-| `GET`  | `/orders/:orderId`  | Confirmación de un pedido propio; pedido ajeno o inexistente → 404 igual |
+| Método | Ruta                | Función                                                                                           |
+| ------ | ------------------- | ------------------------------------------------------------------------------------------------- |
+| `GET`  | `/checkout/summary` | Resumen recalculado en servidor y huella (`fingerprint`) del resumen                              |
+| `POST` | `/orders`           | Confirma el pedido con pago simulado; exige `Idempotency-Key` (UUID v4)                           |
+| `GET`  | `/orders/:orderId`  | Pedido propio (desde M05, ampliado con estado y línea de tiempo); ajeno o inexistente → 404 igual |
 
 Cuerpo de `POST /orders`: datos de entrega ficticios (`recipientName`, `phone`, `department`, `municipality`, `address`, `references` opcional), `simulatedPaymentResult` (`APROBADO` o `RECHAZADO`) y `cartFingerprint`. Cualquier otro campo —`total`, `price`, `userId`, `cardNumber`, `cvv`…— se rechaza con `400`. El total es la suma de precios persistidos × cantidad, congelados en `order_items`.
 
@@ -156,5 +157,25 @@ Los endpoints internos de inventario (`/internal/catalog/stock-reservations`) ex
 - La entrega de la outbox a `audit-service` corresponde a M07; los eventos quedan persistidos en `commerce.outbox_events`.
 - Los servicios comparten un usuario PostgreSQL local; los roles por esquema siguen pendientes.
 - DAST/ZAP, TLS y controles AWS no están implementados. Completar M04 no completa las Fases 3 ni 4.
+
+## API M05
+
+| Método | Ruta               | Función                                                                                 |
+| ------ | ------------------ | --------------------------------------------------------------------------------------- |
+| `GET`  | `/orders?page=1`   | Historial de pedidos propios, del más reciente al más antiguo; 10 por página (servidor) |
+| `GET`  | `/orders/:orderId` | Detalle: líneas con precio congelado, entrega, total, estado vigente y línea de tiempo  |
+
+Sólo el rol `CLIENTE` puede usar estas rutas (`ADMIN` → 403; la consulta administrativa pertenece a M06). El propietario sale siempre de la sesión validada en Identity: la consulta filtra por `user_id` en la base de datos (RN-20). La API identifica los pedidos por UUID v4; el número `SP-…` es sólo informativo (RN-21) y un identificador que no sea UUID v4 responde `400`. Un pedido ajeno y uno inexistente responden el mismo `404 ORDER_NOT_FOUND`; el intento sobre un pedido ajeno se registra como `ACCESS_DENIED` en `commerce.outbox_events`, sin tokens, cookies ni datos de entrega, hasta que M07 lo entregue a `audit-service`.
+
+- **Paginación:** el tamaño de página es fijo (10) y lo decide el servidor; `page` admite enteros 1–10 000. Cualquier otro parámetro (`pageSize`, `limit`, `userId`…) se rechaza con `400`. El orden es estable (`created_at` descendente con desempate por `id`). Una página posterior a la última devuelve `items: []` con los metadatos reales.
+- **Línea de tiempo:** columnas de fecha por estado (`paid_at`, `preparing_at`, `shipped_at`, `delivered_at`, `cancelled_at`). Dos restricciones `CHECK` exigen que cada estado tenga exactamente las fechas de los estados por los que pasó (RN-24) y que sean cronológicas; `statusChangedAt` es la fecha del estado vigente, es decir, la del último cambio. Los pedidos de M04 (PAGADO con `paid_at`) las cumplen sin migrar datos.
+- **Sólo lectura (RN-22):** no existe ninguna ruta de cliente para modificar o cancelar pedidos.
+- **Respuestas sensibles:** `Cache-Control: no-store` y `Pragma: no-cache` en todas las respuestas de Commerce.
+
+### Límites de M05
+
+- Las transiciones de estado las registrará el administrador en M06. En M05, CA-M05-04 se verifica con transiciones simuladas en las pruebas (`simulateAdminTransition`); su validación integral queda para M06.
+- `ACCESS_DENIED` permanece en la outbox; la entrega a `audit-service` y la consulta de auditoría corresponden a M07.
+- La respuesta 404 es idéntica en contenido, pero el caso de pedido ajeno hace una consulta y una escritura adicionales; la diferencia de tiempo no se mitiga en M05.
 
 Consulte [CONTRIBUTING.md](CONTRIBUTING.md) y [SECURITY.md](SECURITY.md) antes de proponer cambios.

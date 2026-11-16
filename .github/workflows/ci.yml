@@ -85,7 +85,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - name: Integración M03/M04 distribuida y cobertura
+      - name: Integración M03–M05 distribuida y cobertura
         run: |
           docker compose --profile test up -d --build --wait postgres identity-service catalog-service
           docker compose --profile test build commerce-test
