@@ -39,7 +39,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
   () => {
     let app: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/commerce-client/index.js').PrismaClient;
     let recovery: Recovery;
     let config: typeof import('../config/commerce.config.js').commerceConfig;
     let helpers: typeof import('./checkout.service.js');
@@ -180,7 +181,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       config.checkoutAttemptsPerMinute = 1_000;
       ({ app, recovery } = await boot());
       server = app.getHttpServer() as Server;
-      prisma = app.get((await import('../database/prisma.service.js')).PrismaService);
+      prisma = (await import('../test-support/fixture-client.js')).createFixtureClient();
     });
 
     beforeEach(async () => {
@@ -212,6 +213,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       }
       Object.assign(config, defaults);
       await app?.close();
+      await prisma?.$disconnect();
       await proxy?.stop();
       if (catalogDb && original) {
         await catalogDb.query('DELETE FROM catalog.stock_reservation_lines');

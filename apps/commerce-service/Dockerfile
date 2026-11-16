@@ -23,4 +23,5 @@ COPY --from=build --chown=node:node /workspace/apps/commerce-service/dist /app/d
 COPY --from=build --chown=node:node /workspace/apps/commerce-service/prisma /app/prisma
 COPY --from=build --chown=node:node /workspace/apps/commerce-service/src/generated/commerce-client /app/dist/generated/commerce-client
 EXPOSE 3003
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && node dist/main.js"]
+# DT-09: el contenedor de ejecución no migra ni siembra; lo hace el job `commerce-migrate` con el rol migrador.
+CMD ["node", "dist/main.js"]

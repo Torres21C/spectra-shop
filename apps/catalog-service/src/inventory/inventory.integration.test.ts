@@ -27,7 +27,8 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
     let app: INestApplication;
     let publicApp: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('@prisma/client').PrismaClient;
     let sweeper: InstanceType<
       typeof import('./reservation-sweeper.service.js').ReservationSweeperService
     >;
@@ -62,14 +63,13 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
     beforeAll(async () => {
       process.env.RESERVATION_SWEEP_INTERVAL_MS = '0';
       token = process.env.CATALOG_INVENTORY_TOKENS!.split(',')[0]!.trim();
-      const [{ InternalAppModule }, { AppModule }, prismaModule, sweeperModule] = await Promise.all(
-        [
+      const [{ InternalAppModule }, { AppModule }, fixtureModule, sweeperModule] =
+        await Promise.all([
           import('../internal-app.module.js'),
           import('../app.module.js'),
-          import('../database/prisma.service.js'),
+          import('../test-support/fixture-client.js'),
           import('./reservation-sweeper.service.js'),
-        ],
-      );
+        ]);
       const pipe = new ValidationPipe({
         whitelist: true,
         forbidNonWhitelisted: true,
@@ -85,7 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
         .useGlobalPipes(pipe);
       await publicApp.init();
       server = app.getHttpServer() as Server;
-      prisma = app.get(prismaModule.PrismaService);
+      prisma = fixtureModule.createFixtureClient();
       sweeper = app.get(sweeperModule.ReservationSweeperService);
       original = (await prisma.product.findMany({ where: { id: { in: PRODUCTS } } })).map(
         (product) => ({
@@ -121,6 +121,7 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
       }
       await app?.close();
       await publicApp?.close();
+      await prisma?.$disconnect();
     });
 
     it('reserves all lines atomically, freezing prices and deducting stock', async () => {

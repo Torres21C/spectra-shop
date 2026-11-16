@@ -16,6 +16,50 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks: [backend]
 
+  # DT-09 (M06.0): POSTGRES_USER es solo el administrador del clúster. Este job crea los roles de
+  # migración y de ejecución de cada servicio, transfiere la propiedad de cada esquema a su migrador y
+  # retira privilegios de PUBLIC. Es idempotente y no borra datos.
+  postgres-provision:
+    image: postgres:16.6-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:?Define POSTGRES_DB in .env}
+      PGUSER: ${POSTGRES_USER:?Define POSTGRES_USER in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD in .env}
+      SPECTRA_IDENTITY_MIGRATOR_PASSWORD: ${SPECTRA_IDENTITY_MIGRATOR_PASSWORD:?Define SPECTRA_IDENTITY_MIGRATOR_PASSWORD in .env}
+      SPECTRA_IDENTITY_APP_PASSWORD: ${SPECTRA_IDENTITY_APP_PASSWORD:?Define SPECTRA_IDENTITY_APP_PASSWORD in .env}
+      SPECTRA_CATALOG_MIGRATOR_PASSWORD: ${SPECTRA_CATALOG_MIGRATOR_PASSWORD:?Define SPECTRA_CATALOG_MIGRATOR_PASSWORD in .env}
+      SPECTRA_CATALOG_APP_PASSWORD: ${SPECTRA_CATALOG_APP_PASSWORD:?Define SPECTRA_CATALOG_APP_PASSWORD in .env}
+      SPECTRA_COMMERCE_MIGRATOR_PASSWORD: ${SPECTRA_COMMERCE_MIGRATOR_PASSWORD:?Define SPECTRA_COMMERCE_MIGRATOR_PASSWORD in .env}
+      SPECTRA_COMMERCE_APP_PASSWORD: ${SPECTRA_COMMERCE_APP_PASSWORD:?Define SPECTRA_COMMERCE_APP_PASSWORD in .env}
+    command:
+      ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', '/provision/provision-service-roles.sql']
+    volumes:
+      - ./infra/postgres/provision-service-roles.sql:/provision/provision-service-roles.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    networks: [backend]
+
+  identity-migrate:
+    build:
+      context: .
+      dockerfile: apps/identity-service/Dockerfile
+    environment:
+      IDENTITY_DATABASE_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+    command:
+      [
+        'sh',
+        '-c',
+        './node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && ./node_modules/.bin/prisma db execute --schema prisma/schema.prisma --file prisma/runtime-grants.sql && node dist/database/seed.js',
+      ]
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    restart: 'no'
+    networks: [backend]
+
   identity-service:
     build:
       context: .
@@ -23,7 +67,7 @@ services:
     environment:
       PORT: '3001'
       INTERNAL_PORT: '3101'
-      IDENTITY_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      IDENTITY_DATABASE_URL: postgresql://spectra_identity_app:${SPECTRA_IDENTITY_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
       IDENTITY_ALLOW_EPHEMERAL_KEYS: 'false'
       IDENTITY_PRIVATE_KEY_PATH: /run/spectra-keys/private.pem
       IDENTITY_PUBLIC_KEY_PATH: /run/spectra-keys/public.pem
@@ -31,8 +75,8 @@ services:
       COOKIE_SECURE: 'false'
       CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-finalize:
+        condition: service_completed_successfully
     ports: ['127.0.0.1:3001:3001']
     volumes:
       - ${SPECTRA_KEYS_DIR:?Define SPECTRA_KEYS_DIR in .env}/private.pem:/run/spectra-keys/private.pem:ro
@@ -57,20 +101,34 @@ services:
       dockerfile: apps/identity-service/Dockerfile
       target: build
     environment:
-      IDENTITY_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      IDENTITY_DATABASE_URL: postgresql://spectra_identity_app:${SPECTRA_IDENTITY_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      IDENTITY_FIXTURE_DATABASE_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
       IDENTITY_ALLOW_EPHEMERAL_KEYS: 'true'
       SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
       COOKIE_SECURE: 'true'
       CORS_ORIGINS: https://127.0.0.1:5173
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-finalize:
+        condition: service_completed_successfully
+    command: ['npm', 'test', '--workspace', '@spectra/identity-service']
+    networks: [backend]
+
+  catalog-migrate:
+    build:
+      context: .
+      dockerfile: apps/catalog-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
     command:
       [
         'sh',
         '-c',
-        'npm run db:deploy --workspace @spectra/identity-service && npm run db:seed:dev --workspace @spectra/identity-service && npm test --workspace @spectra/identity-service',
+        './node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && ./node_modules/.bin/prisma db execute --schema prisma/schema.prisma --file prisma/runtime-grants.sql && node dist/database/seed.js',
       ]
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    restart: 'no'
     networks: [backend]
 
   catalog-service:
@@ -80,13 +138,13 @@ services:
     environment:
       PORT: '3002'
       INTERNAL_PORT: '3102'
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      DATABASE_URL: postgresql://spectra_catalog_app:${SPECTRA_CATALOG_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
       SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
       CATALOG_INVENTORY_TOKENS: ${CATALOG_INVENTORY_TOKENS:?Define CATALOG_INVENTORY_TOKENS in .env}
       CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-finalize:
+        condition: service_completed_successfully
     ports: ['127.0.0.1:3002:3002']
     healthcheck:
       test:
@@ -108,18 +166,14 @@ services:
       dockerfile: apps/catalog-service/Dockerfile
       target: build
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      DATABASE_URL: postgresql://spectra_catalog_app:${SPECTRA_CATALOG_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      CATALOG_FIXTURE_DATABASE_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
       SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
       CATALOG_INVENTORY_TOKENS: ${CATALOG_INVENTORY_TOKENS:?Define CATALOG_INVENTORY_TOKENS in .env}
     depends_on:
-      postgres:
-        condition: service_healthy
-    command:
-      [
-        'sh',
-        '-c',
-        'npm run db:deploy --workspace @spectra/catalog-service && npm run db:seed:dev --workspace @spectra/catalog-service && npm test --workspace @spectra/catalog-service',
-      ]
+      postgres-finalize:
+        condition: service_completed_successfully
+    command: ['npm', 'test', '--workspace', '@spectra/catalog-service']
     networks: [backend]
 
   web:
@@ -147,13 +201,54 @@ services:
       retries: 10
     networks: [edge]
 
+  commerce-migrate:
+    build:
+      context: .
+      dockerfile: apps/commerce-service/Dockerfile
+    environment:
+      COMMERCE_DATABASE_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+    command:
+      [
+        'sh',
+        '-c',
+        './node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && ./node_modules/.bin/prisma db execute --schema prisma/schema.prisma --file prisma/runtime-grants.sql',
+      ]
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    restart: 'no'
+    networks: [backend]
+
+  # DT-09: cierra la ventana de migración (revoca CREATE sobre la base a los migradores) antes de
+  # arrancar cualquier servicio.
+  postgres-finalize:
+    image: postgres:16.6-alpine
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:?Define POSTGRES_DB in .env}
+      PGUSER: ${POSTGRES_USER:?Define POSTGRES_USER in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD in .env}
+    command:
+      ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', '/provision/finalize-service-roles.sql']
+    volumes:
+      - ./infra/postgres/finalize-service-roles.sql:/provision/finalize-service-roles.sql:ro
+    depends_on:
+      identity-migrate:
+        condition: service_completed_successfully
+      catalog-migrate:
+        condition: service_completed_successfully
+      commerce-migrate:
+        condition: service_completed_successfully
+    restart: 'no'
+    networks: [backend]
+
   commerce-service:
     build:
       context: .
       dockerfile: apps/commerce-service/Dockerfile
     environment:
       PORT: '3003'
-      COMMERCE_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+      COMMERCE_DATABASE_URL: postgresql://spectra_commerce_app:${SPECTRA_COMMERCE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
       CATALOG_INTERNAL_URL: http://catalog-service:3102
       IDENTITY_INTERNAL_URL: http://identity-service:3101
       IDENTITY_PUBLIC_KEY_PATH: /run/spectra-keys/public.pem
@@ -162,8 +257,8 @@ services:
       COOKIE_SECURE: 'false'
       CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-finalize:
+        condition: service_completed_successfully
       identity-service:
         condition: service_healthy
       catalog-service:
@@ -191,9 +286,11 @@ services:
       dockerfile: apps/commerce-service/Dockerfile
       target: build
     environment:
-      COMMERCE_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
-      CATALOG_TEST_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
-      IDENTITY_TEST_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      COMMERCE_DATABASE_URL: postgresql://spectra_commerce_app:${SPECTRA_COMMERCE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+      # DT-09: los fixtures usan los migradores; nunca el rol de ejecución de otro servicio.
+      COMMERCE_FIXTURE_DATABASE_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+      CATALOG_TEST_DATABASE_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      IDENTITY_TEST_DATABASE_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
       CATALOG_INTERNAL_URL: http://catalog-service:3102
       IDENTITY_INTERNAL_URL: http://identity-service:3101
       IDENTITY_PUBLIC_KEY_PATH: /run/spectra-keys/public.pem
@@ -206,18 +303,35 @@ services:
       - ${SPECTRA_KEYS_DIR:?Define SPECTRA_KEYS_DIR in .env}/public.pem:/run/spectra-keys/public.pem:ro
       - ${SPECTRA_KEYS_DIR:?Define SPECTRA_KEYS_DIR in .env}/private.pem:/run/test-keys/private.pem:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-finalize:
+        condition: service_completed_successfully
       identity-service:
         condition: service_healthy
       catalog-service:
         condition: service_healthy
-    command:
-      [
-        'sh',
-        '-c',
-        'npm run db:deploy --workspace @spectra/commerce-service && npm test --workspace @spectra/commerce-service',
-      ]
+    command: ['npm', 'test', '--workspace', '@spectra/commerce-service']
+    networks: [backend]
+
+  # DT-09: matriz de privilegios efectivos (positivos y negativos) con los seis roles de servicio.
+  db-isolation-test:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: apps/commerce-service/Dockerfile
+      target: build
+    environment:
+      IDENTITY_APP_URL: postgresql://spectra_identity_app:${SPECTRA_IDENTITY_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      IDENTITY_MIGRATOR_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      CATALOG_APP_URL: postgresql://spectra_catalog_app:${SPECTRA_CATALOG_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      CATALOG_MIGRATOR_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
+      COMMERCE_APP_URL: postgresql://spectra_commerce_app:${SPECTRA_COMMERCE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+      COMMERCE_MIGRATOR_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+    volumes:
+      - ./scripts/verify-db-isolation.mjs:/workspace/scripts/verify-db-isolation.mjs:ro
+    depends_on:
+      postgres-finalize:
+        condition: service_completed_successfully
+    command: ['node', 'scripts/verify-db-isolation.mjs']
     networks: [backend]
 
   audit-service:

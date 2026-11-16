@@ -113,7 +113,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
   () => {
     let app: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/commerce-client/index.js').PrismaClient;
     let catalogDb: Pool;
     let identityDb: Pool;
     let config: typeof import('../config/commerce.config.js').commerceConfig;
@@ -157,9 +158,9 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       ]);
       await Promise.all([first.login(), second.login(), admin.login()]);
 
-      const [{ AppModule }, prismaModule, configModule] = await Promise.all([
+      const [{ AppModule }, fixtureModule, configModule] = await Promise.all([
         import('../app.module.js'),
-        import('../database/prisma.service.js'),
+        import('../test-support/fixture-client.js'),
         import('../config/commerce.config.js'),
       ]);
       config = configModule.commerceConfig;
@@ -176,7 +177,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       );
       await app.init();
       server = app.getHttpServer() as Server;
-      prisma = app.get(prismaModule.PrismaService);
+      prisma = fixtureModule.createFixtureClient();
     });
 
     beforeEach(async () => {
@@ -195,6 +196,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
 
     afterAll(async () => {
       if (app) await app.close();
+      await prisma?.$disconnect();
       await Promise.all([catalogDb?.end(), identityDb?.end()]);
     });
 

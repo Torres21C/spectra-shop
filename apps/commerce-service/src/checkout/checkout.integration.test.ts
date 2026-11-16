@@ -67,7 +67,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
   () => {
     let app: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/commerce-client/index.js').PrismaClient;
     let config: typeof import('../config/commerce.config.js').commerceConfig;
     let recovery: InstanceType<
       typeof import('./checkout-recovery.service.js').CheckoutRecoveryService
@@ -84,9 +85,9 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
     let admin: IdentityAgent;
 
     async function boot(): Promise<void> {
-      const [{ AppModule }, prismaModule, recoveryModule] = await Promise.all([
+      const [{ AppModule }, fixtureModule, recoveryModule] = await Promise.all([
         import('../app.module.js'),
-        import('../database/prisma.service.js'),
+        import('../test-support/fixture-client.js'),
         import('./checkout-recovery.service.js'),
       ]);
       const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -102,7 +103,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       );
       await app.init();
       server = app.getHttpServer() as Server;
-      prisma = app.get(prismaModule.PrismaService);
+      prisma = fixtureModule.createFixtureClient();
       recovery = app.get(recoveryModule.CheckoutRecoveryService);
     }
 
@@ -258,6 +259,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
           );
         }
       }
+      await prisma?.$disconnect();
       await Promise.all([catalogDb?.end(), identityDb?.end()]);
     });
 

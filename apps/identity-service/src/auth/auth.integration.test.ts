@@ -50,8 +50,8 @@ describe.skipIf(!process.env.IDENTITY_DATABASE_URL)(
     let app: INestApplication;
     let server: Server;
     let certificate: string;
-    let PrismaServiceClass: typeof import('../database/prisma.service.js').PrismaService;
-    let prisma: InstanceType<typeof PrismaServiceClass>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/identity-client/index.js').PrismaClient;
 
     async function csrf(agent: Agent): Promise<string> {
       const response = await agent.get('/auth/csrf').ca(certificate).expect(200);
@@ -82,11 +82,10 @@ describe.skipIf(!process.env.IDENTITY_DATABASE_URL)(
       process.env.COOKIE_SECURE = 'true';
       process.env.IDENTITY_ALLOW_EPHEMERAL_KEYS = 'true';
       process.env.CORS_ORIGINS = ORIGIN;
-      const [{ AppModule }, prismaModule] = await Promise.all([
+      const [{ AppModule }, { createFixtureClient }] = await Promise.all([
         import('../app.module.js'),
-        import('../database/prisma.service.js'),
+        import('../test-support/fixture-client.js'),
       ]);
-      PrismaServiceClass = prismaModule.PrismaService;
       const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
       app = moduleRef.createNestApplication();
       app.use(cookieParser());
@@ -99,7 +98,7 @@ describe.skipIf(!process.env.IDENTITY_DATABASE_URL)(
         }),
       );
       await app.init();
-      prisma = app.get(PrismaServiceClass);
+      prisma = createFixtureClient();
       await prisma.outboxEvent.deleteMany();
       await prisma.refreshToken.deleteMany();
       await prisma.authSession.deleteMany();
@@ -142,6 +141,7 @@ describe.skipIf(!process.env.IDENTITY_DATABASE_URL)(
         );
       }
       if (app !== undefined) await app.close();
+      if (prisma !== undefined) await prisma.$disconnect();
     });
 
     it('CA-M02-01 rejects role and isAdmin, then assigns CLIENTE server-side', async () => {

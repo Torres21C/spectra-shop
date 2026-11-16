@@ -22,4 +22,5 @@ COPY --from=build --chown=node:node /workspace/node_modules /app/node_modules
 COPY --from=build --chown=node:node /workspace/apps/catalog-service/dist /app/dist
 COPY --from=build --chown=node:node /workspace/apps/catalog-service/prisma /app/prisma
 EXPOSE 3002
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && node dist/database/seed.js && node dist/main.js"]
+# DT-09: el contenedor de ejecución no migra ni siembra; lo hace el job `catalog-migrate` con el rol migrador.
+CMD ["node", "dist/main.js"]

@@ -38,4 +38,10 @@ export default tseslint.config(
     files: ['**/*.test.ts', '**/*.test.tsx'],
     rules: { '@typescript-eslint/unbound-method': 'off' },
   },
+  {
+    // Herramientas de verificación en JavaScript (p. ej. DT-09): sin proyecto TypeScript y con salida por consola.
+    files: ['scripts/**/*.mjs'],
+    ...tseslint.configs.disableTypeChecked,
+    rules: { ...tseslint.configs.disableTypeChecked.rules, 'no-console': 'off' },
+  },
 );
