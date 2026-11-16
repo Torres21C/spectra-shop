@@ -749,7 +749,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
 
       proxy.reset();
       const result = await recovery.runOnce();
-      expect(result.ABORTED).toBe(1);
+      expect(result.outcomes.ABORTED).toBe(1);
       expect((await attemptFor(ana.userId)).state).toBe('ABORTED');
       expect(await reservation(attempt.reservationId)).toBe('RELEASED');
       expect(await stock(STAND)).toBe(3);

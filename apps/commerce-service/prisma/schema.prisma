@@ -85,6 +85,12 @@ model CheckoutAttempt {
   failureDetails   Json?                  @map("failure_details")
   orderId          String?                @unique @map("order_id") @db.Uuid
   recoveryAttempts Int                    @default(0) @map("recovery_attempts")
+  /// M04.1: no reintentar antes de esta fecha (backoff exponencial acotado).
+  nextRecoveryAt   DateTime?              @map("next_recovery_at") @db.Timestamptz(3)
+  /// M04.1: último error de recuperación, como código en lista blanca (nunca mensajes ni datos).
+  lastRecoveryError String?               @map("last_recovery_error") @db.VarChar(40)
+  /// M04.1: momento en que la saga se declaró atascada y se emitió la alerta (una sola vez).
+  stuckSince       DateTime?              @map("stuck_since") @db.Timestamptz(3)
   expiresAt        DateTime               @map("expires_at") @db.Timestamptz(3)
   createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -93,6 +99,7 @@ model CheckoutAttempt {
 
   @@unique([userId, idempotencyKey])
   @@index([state, leaseUntil])
+  @@index([state, nextRecoveryAt])
   @@index([userId, createdAt])
   @@map("checkout_attempts")
 }

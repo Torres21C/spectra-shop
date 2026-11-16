@@ -58,6 +58,43 @@ class LeaseLostError extends Error {
   }
 }
 
+/** Las líneas confirmadas por Catalog no coinciden con el intento: requiere intervención. */
+class ReservationMismatchError extends Error {
+  constructor() {
+    super('reservation lines mismatch');
+    this.name = 'ReservationMismatchError';
+  }
+}
+
+export type RecoveryErrorCode =
+  'INVENTORY_UNAVAILABLE' | 'RESERVATION_MISMATCH' | 'PERSISTENCE_ERROR' | 'UNEXPECTED_ERROR';
+
+export interface SagaMetrics {
+  readonly inflight: { STARTED: number; RESERVED: number; CONFIRMED: number };
+  readonly inflightTotal: number;
+  readonly stuck: number;
+  readonly oldestInflightAgeSeconds: number;
+  readonly maxRecoveryAttempts: number;
+  readonly nextRecoveryInSeconds: number | null;
+}
+
+/** Clasificación en lista blanca: nunca se persisten mensajes de error ni datos. */
+export function recoveryErrorCode(error: unknown): RecoveryErrorCode {
+  if (error instanceof InventoryUnavailableError) return 'INVENTORY_UNAVAILABLE';
+  if (error instanceof ReservationMismatchError) return 'RESERVATION_MISMATCH';
+  const name = error instanceof Error ? error.name : '';
+  if (name.startsWith('PrismaClient')) return 'PERSISTENCE_ERROR';
+  return 'UNEXPECTED_ERROR';
+}
+
+export function recoveryBackoffMs(recoveryAttempts: number): number {
+  const exponent = Math.min(Math.max(recoveryAttempts - 1, 0), 30);
+  return Math.min(
+    commerceConfig.recoveryBackoffBaseMs * 2 ** exponent,
+    commerceConfig.recoveryBackoffMaxMs,
+  );
+}
+
 function pending(): ServiceUnavailableException {
   return new ServiceUnavailableException({
     code: 'CHECKOUT_PENDING',
@@ -238,6 +275,10 @@ export class CheckoutService {
   /**
    * Reconciliación de un intento cuyo arrendamiento venció (proceso caído, timeout o reinicio).
    * Hacia atrás si Catalog no confirmó la reserva; hacia adelante si ya la confirmó.
+   *
+   * M04.1: nunca abandona una saga ni libera stock confirmado. Un fallo programa el siguiente
+   * intento con backoff exponencial acotado y registra un código de error en lista blanca; la
+   * detección de sagas atascadas (`detectStuck`) alerta en lugar de reintentar en silencio.
    */
   async reconcile(attemptId: string, requestId: string): Promise<ReconcileResult> {
     const owner = randomUUID();
@@ -246,7 +287,10 @@ export class CheckoutService {
       where: {
         id: attemptId,
         state: { in: [...INFLIGHT_STATES] },
-        OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }],
+        AND: [
+          { OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] },
+          { OR: [{ nextRecoveryAt: null }, { nextRecoveryAt: { lte: now } }] },
+        ],
       },
       data: {
         leaseOwner: owner,
@@ -275,38 +319,187 @@ export class CheckoutService {
         if (state.status !== 'CONFIRMED') {
           await this.terminate(current, owner, 'ABORTED', 'RECOVERY_RELEASED', undefined);
           this.logger.warn({ event: 'checkout_compensated', attemptId, requestId });
+          await this.recordRecovered(attempt, 'ABORTED', actor);
           return 'ABORTED';
         }
-        if (!sameLines(attemptLines(current), state.lines)) throw new Error('reservation lines');
+        if (!sameLines(attemptLines(current), state.lines)) {
+          throw new ReservationMismatchError();
+        }
         current = await this.transition(current, owner, 'CONFIRMED', {
           pricedLines: state.lines.map((line) => ({ ...line })),
         });
       }
       await this.complete(current, owner, actor);
       this.logger.log({ event: 'checkout_recovered_forward', attemptId, requestId });
+      await this.recordRecovered(attempt, 'COMPLETED', actor);
       return 'COMPLETED';
     } catch (error: unknown) {
-      if (error instanceof InventoryUnavailableError) {
-        await this.releaseLease(attempt.id, owner);
-        return 'DEFERRED';
-      }
       if (error instanceof LeaseLostError) return 'SKIPPED';
-      await this.releaseLease(attempt.id, owner);
-      throw error;
+      const code = recoveryErrorCode(error);
+      const delayMs = await this.scheduleRetry(attempt, owner, code);
+      const log = {
+        event: 'checkout_recovery_deferred',
+        attemptId,
+        requestId,
+        state: attempt.state,
+        recoveryAttempts: attempt.recoveryAttempts,
+        errorCode: code,
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+        retryInMs: delayMs,
+      };
+      if (code === 'INVENTORY_UNAVAILABLE') this.logger.warn(log);
+      else this.logger.error(log);
+      return 'DEFERRED';
     }
   }
 
   async staleAttempts(limit: number): Promise<string[]> {
+    const now = new Date();
     const rows = await this.prisma.checkoutAttempt.findMany({
       where: {
         state: { in: [...INFLIGHT_STATES] },
-        OR: [{ leaseUntil: null }, { leaseUntil: { lt: new Date() } }],
+        AND: [
+          { OR: [{ leaseUntil: null }, { leaseUntil: { lt: now } }] },
+          { OR: [{ nextRecoveryAt: null }, { nextRecoveryAt: { lte: now } }] },
+        ],
       },
       orderBy: { updatedAt: 'asc' },
       take: limit,
       select: { id: true },
     });
     return rows.map((row) => row.id);
+  }
+
+  /**
+   * Declara atascadas las sagas en curso que superan la antigüedad o los reintentos permitidos y
+   * emite la alerta una sola vez por saga (log de error + evento técnico en la outbox). Considera
+   * todas las sagas en curso, incluso con arrendamiento vigente o en espera de backoff.
+   */
+  async detectStuck(): Promise<string[]> {
+    const now = new Date();
+    const candidates = await this.prisma.checkoutAttempt.findMany({
+      where: {
+        state: { in: [...INFLIGHT_STATES] },
+        stuckSince: null,
+        OR: [
+          { createdAt: { lt: new Date(now.getTime() - commerceConfig.stuckAgeMs) } },
+          { recoveryAttempts: { gte: commerceConfig.stuckAttempts } },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+    const flagged: string[] = [];
+    for (const candidate of candidates) {
+      const marked = await this.prisma.checkoutAttempt.updateMany({
+        where: { id: candidate.id, stuckSince: null, state: { in: [...INFLIGHT_STATES] } },
+        data: { stuckSince: now },
+      });
+      if (marked.count !== 1) continue;
+      flagged.push(candidate.id);
+      const metadata = {
+        state: candidate.state,
+        // CONFIRMED: Catalog ya confirmó la reserva (punto de no retorno); nunca se libera sola.
+        pointOfNoReturn: candidate.state === 'CONFIRMED' ? 'yes' : 'unknown',
+        recoveryAttempts: candidate.recoveryAttempts,
+        ageSeconds: Math.round((now.getTime() - candidate.createdAt.getTime()) / 1000),
+        lastRecoveryError: candidate.lastRecoveryError ?? 'NONE',
+      };
+      this.logger.error({ event: 'checkout_saga_stuck', attemptId: candidate.id, ...metadata });
+      await this.outbox.record(
+        { userId: candidate.userId, role: 'CLIENTE', requestId: randomUUID() },
+        {
+          eventType: 'CHECKOUT_SAGA_STUCK',
+          result: 'FALLO',
+          resourceType: 'checkout',
+          resourceId: candidate.id,
+          metadata,
+        },
+      );
+    }
+    return flagged;
+  }
+
+  /** Indicadores de salud de la saga, calculados desde la base de datos (fuente de verdad). */
+  async sagaMetrics(): Promise<SagaMetrics> {
+    const now = Date.now();
+    const [grouped, stuck, oldest, maxAttempts, nextDue] = await Promise.all([
+      this.prisma.checkoutAttempt.groupBy({
+        by: ['state'],
+        where: { state: { in: [...INFLIGHT_STATES] } },
+        _count: { _all: true },
+      }),
+      this.prisma.checkoutAttempt.count({
+        where: { state: { in: [...INFLIGHT_STATES] }, stuckSince: { not: null } },
+      }),
+      this.prisma.checkoutAttempt.findFirst({
+        where: { state: { in: [...INFLIGHT_STATES] } },
+        orderBy: { createdAt: 'asc' },
+        select: { createdAt: true },
+      }),
+      this.prisma.checkoutAttempt.aggregate({
+        where: { state: { in: [...INFLIGHT_STATES] } },
+        _max: { recoveryAttempts: true },
+      }),
+      this.prisma.checkoutAttempt.findFirst({
+        where: { state: { in: [...INFLIGHT_STATES] }, nextRecoveryAt: { not: null } },
+        orderBy: { nextRecoveryAt: 'asc' },
+        select: { nextRecoveryAt: true },
+      }),
+    ]);
+    const inflight = { STARTED: 0, RESERVED: 0, CONFIRMED: 0 };
+    for (const row of grouped) {
+      if (row.state in inflight) inflight[row.state as keyof typeof inflight] = row._count._all;
+    }
+    return {
+      inflight,
+      inflightTotal: inflight.STARTED + inflight.RESERVED + inflight.CONFIRMED,
+      stuck,
+      oldestInflightAgeSeconds: oldest ? Math.round((now - oldest.createdAt.getTime()) / 1000) : 0,
+      maxRecoveryAttempts: maxAttempts._max.recoveryAttempts ?? 0,
+      nextRecoveryInSeconds: nextDue?.nextRecoveryAt
+        ? Math.max(0, Math.round((nextDue.nextRecoveryAt.getTime() - now) / 1000))
+        : null,
+    };
+  }
+
+  /** Backoff exponencial acotado: base × 2^(intentos−1), con tope. Devuelve la espera aplicada. */
+  private async scheduleRetry(
+    attempt: CheckoutAttempt,
+    owner: string,
+    code: RecoveryErrorCode,
+  ): Promise<number> {
+    const delayMs = recoveryBackoffMs(attempt.recoveryAttempts);
+    await this.prisma.checkoutAttempt.updateMany({
+      where: { id: attempt.id, leaseOwner: owner, state: { in: [...INFLIGHT_STATES] } },
+      data: {
+        leaseUntil: new Date(),
+        nextRecoveryAt: new Date(Date.now() + delayMs),
+        lastRecoveryError: code,
+      },
+    });
+    return delayMs;
+  }
+
+  private async recordRecovered(
+    attempt: CheckoutAttempt,
+    outcome: 'COMPLETED' | 'ABORTED',
+    actor: AuditActor,
+  ): Promise<void> {
+    if (!attempt.stuckSince) return;
+    const metadata = {
+      outcome,
+      recoveryAttempts: attempt.recoveryAttempts,
+      stuckSeconds: Math.round((Date.now() - attempt.stuckSince.getTime()) / 1000),
+    };
+    this.logger.log({ event: 'checkout_saga_recovered', attemptId: attempt.id, ...metadata });
+    await this.outbox.record(actor, {
+      eventType: 'CHECKOUT_SAGA_RECOVERED',
+      result: 'EXITO',
+      resourceType: 'checkout',
+      resourceId: attempt.id,
+      metadata,
+    });
   }
 
   private findByKey(userId: string, key: string): Promise<CheckoutAttempt | null> {
@@ -561,7 +754,7 @@ export class CheckoutService {
       return this.failStock(attempt, owner, actor, result.conflicts);
     }
     if (result.kind === 'released') throw new LeaseLostError();
-    if (!sameLines(lines, result.reservation.lines)) throw new Error('reservation lines');
+    if (!sameLines(lines, result.reservation.lines)) throw new ReservationMismatchError();
     return this.transition(attempt, owner, 'RESERVED', {});
   }
 
@@ -580,7 +773,7 @@ export class CheckoutService {
       });
     }
     if (!sameLines(attemptLines(attempt), result.reservation.lines)) {
-      throw new Error('reservation lines');
+      throw new ReservationMismatchError();
     }
     return this.transition(attempt, owner, 'CONFIRMED', {
       pricedLines: result.reservation.lines.map((line) => ({ ...line })),

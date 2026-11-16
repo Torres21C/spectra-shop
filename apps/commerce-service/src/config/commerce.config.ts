@@ -60,6 +60,12 @@ export const commerceConfig = {
   /** Intervalo del reconciliador de sagas; 0 lo limita al arranque. */
   recoveryIntervalMs: integerEnv('CHECKOUT_RECOVERY_INTERVAL_MS', 15_000, 0, 600_000),
   recoveryBatchSize: 20,
+  /** M04.1: backoff exponencial del reconciliador (base y tope) tras un intento fallido. */
+  recoveryBackoffBaseMs: integerEnv('CHECKOUT_RECOVERY_BACKOFF_BASE_MS', 15_000, 10, 600_000),
+  recoveryBackoffMaxMs: integerEnv('CHECKOUT_RECOVERY_BACKOFF_MAX_MS', 900_000, 10, 86_400_000),
+  /** M04.1: una saga en curso se declara atascada por antigüedad o por número de reintentos. */
+  stuckAgeMs: integerEnv('CHECKOUT_STUCK_AGE_MS', 300_000, 10, 86_400_000),
+  stuckAttempts: integerEnv('CHECKOUT_STUCK_ATTEMPTS', 5, 1, 1_000),
   /** Espera máxima de una petición duplicada concurrente antes de responder 409 en curso. */
   duplicateWaitMs: integerEnv('CHECKOUT_DUPLICATE_WAIT_MS', 5_000, 0, 30_000),
   /** RS10: intentos nuevos de checkout por cuenta y minuto. */
