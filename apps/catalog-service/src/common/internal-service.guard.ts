@@ -13,20 +13,25 @@ function digest(value: string): Buffer {
   return createHash('sha256').update(value, 'utf8').digest();
 }
 
-@Injectable()
-export class InternalServiceGuard implements CanActivate {
+export function readInternalTokens(variable: string): string[] {
+  const tokens = (process.env[variable] ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (tokens.length < 1 || tokens.length > 2 || tokens.some((value) => value.length < 32)) {
+    throw new Error(`${variable} requiere uno o dos tokens de al menos 32 caracteres`);
+  }
+  return tokens;
+}
+
+/**
+ * Autenticación servicio a servicio por token aleatorio. Cada alcance tiene su propia
+ * variable para que una credencial de lectura no habilite operaciones de inventario.
+ */
+abstract class InternalTokenGuard implements CanActivate {
   private readonly accepted: readonly Buffer[];
 
-  constructor() {
-    const tokens = (process.env.SPECTRA_INTERNAL_TOKENS ?? '')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
-    if (tokens.length < 1 || tokens.length > 2 || tokens.some((value) => value.length < 32)) {
-      throw new Error(
-        'SPECTRA_INTERNAL_TOKENS requiere uno o dos tokens de al menos 32 caracteres',
-      );
-    }
+  protected constructor(tokens: readonly string[]) {
     this.accepted = tokens.map(digest);
   }
 
@@ -42,5 +47,26 @@ export class InternalServiceGuard implements CanActivate {
       });
     }
     return true;
+  }
+}
+
+/** Alcance de lectura usado por el snapshot del carrito (M03). */
+@Injectable()
+export class InternalServiceGuard extends InternalTokenGuard {
+  constructor() {
+    super(readInternalTokens('SPECTRA_INTERNAL_TOKENS'));
+  }
+}
+
+/** Alcance de escritura de inventario: solo Commerce posee este token (M04). */
+@Injectable()
+export class InventoryServiceGuard extends InternalTokenGuard {
+  constructor() {
+    const inventory = readInternalTokens('CATALOG_INVENTORY_TOKENS');
+    const shared = new Set(readInternalTokens('SPECTRA_INTERNAL_TOKENS'));
+    if (inventory.some((token) => shared.has(token))) {
+      throw new Error('CATALOG_INVENTORY_TOKENS debe ser distinto de SPECTRA_INTERNAL_TOKENS');
+    }
+    super(inventory);
   }
 }

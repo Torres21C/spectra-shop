@@ -42,6 +42,20 @@ export interface ApiErrorResponse {
   readonly message: string;
   readonly requestId: string;
   readonly timestamp: string;
+  readonly details?: ApiErrorDetails;
+}
+
+export type CheckoutConflictReason = 'INACTIVE' | 'INSUFFICIENT_STOCK' | 'PRICE_CHANGED';
+
+export interface CheckoutConflictLine {
+  readonly productId: string;
+  readonly reason: CheckoutConflictReason;
+  /** Unidades que todavía pueden comprarse, acotadas a 10 como en M03. */
+  readonly available: number;
+}
+
+export interface ApiErrorDetails {
+  readonly conflicts?: readonly CheckoutConflictLine[];
 }
 
 export type UserRole = 'CLIENTE' | 'ADMIN';
@@ -101,3 +115,128 @@ export interface ShoppingCart {
   readonly checkoutAllowed: boolean;
   readonly updatedAt: string;
 }
+
+export type StockReservationStatus = 'PENDING' | 'CONFIRMED' | 'RELEASED';
+
+export interface StockReservationLineRequest {
+  readonly productId: string;
+  readonly quantity: number;
+  readonly expectedUnitPrice: string;
+}
+
+export interface StockReservationRequest {
+  readonly reservationId: string;
+  readonly lines: readonly StockReservationLineRequest[];
+}
+
+export interface StockReservationLine {
+  readonly productId: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPrice: string;
+}
+
+export interface StockReservation {
+  readonly reservationId: string;
+  readonly status: StockReservationStatus;
+  readonly expiresAt: string;
+  readonly lines: readonly StockReservationLine[];
+}
+
+export interface StockReservationState {
+  readonly reservationId: string;
+  readonly status: StockReservationStatus | 'NOT_FOUND';
+  readonly expired: boolean;
+  readonly lines: readonly StockReservationLine[];
+}
+
+export interface StockReservationConflict {
+  readonly code: 'STOCK_CONFLICT';
+  readonly conflicts: readonly CheckoutConflictLine[];
+}
+
+export type SimulatedPaymentResult = 'APROBADO' | 'RECHAZADO';
+
+export type OrderStatus = 'PAGADO' | 'EN_PREPARACION' | 'ENVIADO' | 'ENTREGADO' | 'CANCELADO';
+
+export interface CheckoutSummaryLine {
+  readonly productId: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPrice: string;
+  readonly subtotal: string;
+  readonly available: boolean;
+  readonly unavailableReason?: 'INACTIVE' | 'OUT_OF_STOCK' | 'INSUFFICIENT_STOCK';
+}
+
+export interface CheckoutSummary {
+  readonly cartId: string;
+  readonly items: readonly CheckoutSummaryLine[];
+  readonly itemCount: number;
+  readonly total: string;
+  readonly currency: 'GTQ';
+  /** Huella SHA-256 del resumen calculado en servidor; no contiene importes manipulables. */
+  readonly fingerprint: string;
+  readonly checkoutAllowed: boolean;
+  readonly checkoutInProgress: boolean;
+}
+
+export interface ShippingDetails {
+  readonly recipientName: string;
+  readonly phone: string;
+  readonly department: string;
+  readonly municipality: string;
+  readonly address: string;
+  readonly references?: string;
+}
+
+export interface PlaceOrderRequest extends ShippingDetails {
+  readonly simulatedPaymentResult: SimulatedPaymentResult;
+  readonly cartFingerprint: string;
+}
+
+export interface OrderLine {
+  readonly productId: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly unitPrice: string;
+  readonly lineTotal: string;
+}
+
+export interface OrderConfirmation {
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly status: OrderStatus;
+  readonly total: string;
+  readonly currency: 'GTQ';
+  readonly itemCount: number;
+  readonly paymentReference: string;
+  readonly createdAt: string;
+  readonly items: readonly OrderLine[];
+  readonly shipping: ShippingDetails;
+}
+
+/** Lista cerrada de los 22 departamentos (ERS §2.4); cada servicio mantiene su copia en tiempo de ejecución. */
+export type GuatemalaDepartment =
+  | 'Alta Verapaz'
+  | 'Baja Verapaz'
+  | 'Chimaltenango'
+  | 'Chiquimula'
+  | 'El Progreso'
+  | 'Escuintla'
+  | 'Guatemala'
+  | 'Huehuetenango'
+  | 'Izabal'
+  | 'Jalapa'
+  | 'Jutiapa'
+  | 'Petén'
+  | 'Quetzaltenango'
+  | 'Quiché'
+  | 'Retalhuleu'
+  | 'Sacatepéquez'
+  | 'San Marcos'
+  | 'Santa Rosa'
+  | 'Sololá'
+  | 'Suchitepéquez'
+  | 'Totonicapán'
+  | 'Zacapa';
