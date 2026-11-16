@@ -155,15 +155,16 @@ export function CartPage() {
             {!cart.checkoutAllowed && (
               <p className="cart-warning">Elimina o ajusta las líneas no disponibles.</p>
             )}
-            <button
-              className="primary-button"
-              type="button"
-              disabled
-              title="Disponible en M04 Checkout"
-            >
-              Continuar al checkout · M04
-            </button>
-            <small>Agregar al carrito no reserva inventario.</small>
+            {cart.checkoutAllowed ? (
+              <a className="primary-button checkout-link" href="#/checkout">
+                Continuar al checkout
+              </a>
+            ) : (
+              <button className="primary-button" type="button" disabled>
+                Continuar al checkout
+              </button>
+            )}
+            <small>El inventario se reserva solo al confirmar el pedido.</small>
           </aside>
         </div>
       </section>

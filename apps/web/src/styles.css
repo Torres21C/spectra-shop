@@ -625,6 +625,114 @@ button:disabled {
   color: #ffd4ad;
 }
 
+.checkout-link {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+.checkout-form {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.6rem;
+  background: #fffdf8;
+  border: 1px solid #ded8cd;
+  border-radius: 16px;
+}
+.checkout-form fieldset {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.checkout-form legend {
+  margin-bottom: 0.8rem;
+  font-weight: 800;
+}
+.checkout-warning {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  background: #fff4e0;
+  color: #6b4a12;
+}
+.checkout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.checkout-grid label {
+  display: grid;
+  gap: 0.45rem;
+  color: #526074;
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+.checkout-grid input,
+.checkout-grid select {
+  min-height: 46px;
+  padding: 0 0.9rem;
+  border: 1px solid #cfc7bb;
+  border-radius: 10px;
+  background: #f7f4ed;
+  color: #172235;
+}
+.field-invalid input,
+.field-invalid select {
+  border-color: #b4474f;
+}
+.field-error {
+  color: #9a2f37;
+  font-weight: 650;
+}
+.payment-choice {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.payment-choice .check-field {
+  padding: 0.9rem 1rem;
+  border: 1px solid #cfc7bb;
+  border-radius: 10px;
+  background: #f7f4ed;
+}
+.form-message p,
+.form-message ul {
+  margin: 0 0 0.6rem;
+}
+.notice-error {
+  background: #fbe9ea;
+  color: #7c252c !important;
+}
+.notice-pending {
+  background: #fff4e0;
+  color: #6b4a12 !important;
+}
+.checkout-lines {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: #e7eef0;
+}
+.checkout-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.checkout-lines .line-unavailable {
+  color: #ffd4ad;
+}
+.order-status {
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  background: #e5f1ec;
+  color: #174d42;
+  font-weight: 800;
+}
+.confirmation-line {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 @media (max-width: 900px) {
   .cart-layout,
   .detail-card {
@@ -635,6 +743,10 @@ button:disabled {
   }
   .cart-summary {
     position: static;
+  }
+  .checkout-grid,
+  .payment-choice {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -7,6 +7,8 @@ import { LoginPage } from './auth/LoginPage.js';
 import { RegisterPage } from './auth/RegisterPage.js';
 import { CartProvider, useCart } from './cart/CartContext.js';
 import { CartPage } from './cart/CartPage.js';
+import { CheckoutPage } from './checkout/CheckoutPage.js';
+import { OrderConfirmationPage } from './checkout/OrderConfirmationPage.js';
 
 function currentRoute(): string {
   return window.location.hash.slice(1) || '/';
@@ -26,8 +28,11 @@ function Application() {
   const [rawPath, query = ''] = route.split('?', 2);
   const path = rawPath ?? '/';
   const productMatch = /^\/producto\/([0-9a-f-]+)$/i.exec(path);
+  const confirmationMatch = /^\/checkout\/confirmacion\/([0-9a-f-]{36})$/i.exec(path);
   let page = <CatalogPage />;
   if (productMatch?.[1]) page = <ProductDetailPage productId={productMatch[1]} />;
+  else if (confirmationMatch?.[1]) page = <OrderConfirmationPage orderId={confirmationMatch[1]} />;
+  else if (path === '/checkout') page = <CheckoutPage />;
   else if (path === '/login') {
     const returnTo = new URLSearchParams(query).get('returnTo') ?? '#/pedidos';
     page = <LoginPage returnTo={returnTo} />;
