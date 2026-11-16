@@ -180,6 +180,11 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
     });
 
     beforeEach(async () => {
+      // Datos M04 que referencian carritos (FK RESTRICT); se limpian antes de los carritos.
+      await prisma.orderItem.deleteMany();
+      await prisma.order.deleteMany();
+      await prisma.checkoutAttempt.deleteMany();
+      await prisma.outboxEvent.deleteMany();
       await prisma.cartItem.deleteMany();
       await prisma.cart.deleteMany();
       await catalogDb.query(

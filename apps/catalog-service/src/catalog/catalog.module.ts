@@ -6,6 +6,6 @@ import { CatalogService } from './catalog.service.js';
 @Module({
   controllers: [CatalogController],
   providers: [CatalogService, PrismaService],
-  exports: [CatalogService],
+  exports: [CatalogService, PrismaService],
 })
 export class CatalogModule {}

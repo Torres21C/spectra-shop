@@ -33,9 +33,47 @@ model Product {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  reservationLines StockReservationLine[]
 
   @@index([categoryId])
   @@index([isActive, name])
   @@index([searchText])
   @@map("products")
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  RELEASED
+}
+
+/// Reserva de inventario solicitada por Commerce (saga M04). El stock se descuenta al reservar.
+model StockReservation {
+  id            String                 @id @db.Uuid
+  caller        String                 @db.VarChar(32)
+  status        ReservationStatus
+  requestHash   String?                @map("request_hash") @db.Char(64)
+  expiresAt     DateTime               @map("expires_at") @db.Timestamptz(3)
+  createdAt     DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  confirmedAt   DateTime?              @map("confirmed_at") @db.Timestamptz(3)
+  releasedAt    DateTime?              @map("released_at") @db.Timestamptz(3)
+  releaseReason String?                @map("release_reason") @db.VarChar(32)
+  lines         StockReservationLine[]
+
+  @@index([status, expiresAt])
+  @@map("stock_reservations")
+}
+
+model StockReservationLine {
+  reservationId String           @map("reservation_id") @db.Uuid
+  productId     String           @map("product_id") @db.Uuid
+  quantity      Int
+  unitPrice     Decimal          @map("unit_price") @db.Decimal(10, 2)
+  productName   String           @map("product_name") @db.VarChar(150)
+  reservation   StockReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  product       Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@id([reservationId, productId])
+  @@index([productId])
+  @@map("stock_reservation_lines")
 }

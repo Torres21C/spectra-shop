@@ -20,6 +20,7 @@ model Cart {
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
   items     CartItem[]
+  checkoutAttempts CheckoutAttempt[]
 
   @@index([userId, status])
   @@map("carts")
@@ -37,4 +38,121 @@ model CartItem {
   @@unique([cartId, productId])
   @@index([productId])
   @@map("cart_items")
+}
+
+/// Estados técnicos de la saga de checkout (D-M04-05). No son estados de negocio del pedido.
+enum CheckoutState {
+  STARTED
+  RESERVED
+  CONFIRMED
+  COMPLETED
+  REJECTED
+  FAILED
+  ABORTED
+}
+
+/// Estados de negocio del pedido (ERS RN-24).
+enum OrderStatus {
+  PAGADO
+  EN_PREPARACION
+  ENVIADO
+  ENTREGADO
+  CANCELADO
+}
+
+enum SimulatedPaymentResult {
+  APROBADO
+  RECHAZADO
+}
+
+/// Intento de checkout identificado por (usuario, Idempotency-Key). Persistencia de la saga.
+model CheckoutAttempt {
+  id               String                 @id @default(uuid()) @db.Uuid
+  userId           String                 @map("user_id") @db.Uuid
+  cartId           String                 @map("cart_id") @db.Uuid
+  idempotencyKey   String                 @map("idempotency_key") @db.Uuid
+  requestHash      String                 @map("request_hash") @db.Char(64)
+  cartFingerprint  String                 @map("cart_fingerprint") @db.Char(64)
+  state            CheckoutState
+  reservationId    String                 @unique @map("reservation_id") @db.Uuid
+  leaseOwner       String?                @map("lease_owner") @db.Uuid
+  leaseUntil       DateTime?              @map("lease_until") @db.Timestamptz(3)
+  paymentResult    SimulatedPaymentResult @map("payment_result")
+  lines            Json
+  pricedLines      Json?                  @map("priced_lines")
+  shipping         Json?
+  failureCode      String?                @map("failure_code") @db.VarChar(40)
+  failureDetails   Json?                  @map("failure_details")
+  orderId          String?                @unique @map("order_id") @db.Uuid
+  recoveryAttempts Int                    @default(0) @map("recovery_attempts")
+  expiresAt        DateTime               @map("expires_at") @db.Timestamptz(3)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  cart             Cart                   @relation(fields: [cartId], references: [id], onDelete: Restrict)
+  order            Order?
+
+  @@unique([userId, idempotencyKey])
+  @@index([state, leaseUntil])
+  @@index([userId, createdAt])
+  @@map("checkout_attempts")
+}
+
+model Order {
+  id                  String          @id @default(uuid()) @db.Uuid
+  orderNumber         String          @unique @default(dbgenerated("('SP-'::text || nextval('commerce.order_number_seq'::regclass))")) @map("order_number") @db.VarChar(20)
+  userId              String          @map("user_id") @db.Uuid
+  idempotencyKey      String          @map("idempotency_key") @db.Uuid
+  checkoutAttemptId   String          @unique @map("checkout_attempt_id") @db.Uuid
+  status              OrderStatus     @default(PAGADO)
+  total               Decimal         @db.Decimal(12, 2)
+  currency            String          @default("GTQ") @db.Char(3)
+  shippingName        String          @map("shipping_name") @db.VarChar(80)
+  shippingPhone       String          @map("shipping_phone") @db.VarChar(9)
+  shippingDepartment  String          @map("shipping_department") @db.VarChar(40)
+  shippingMunicipality String         @map("shipping_municipality") @db.VarChar(60)
+  shippingAddress     String          @map("shipping_address") @db.VarChar(150)
+  shippingReferences  String?         @map("shipping_references") @db.VarChar(200)
+  paymentReference    String          @unique @map("payment_reference") @db.VarChar(32)
+  paidAt              DateTime        @map("paid_at") @db.Timestamptz(3)
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  attempt             CheckoutAttempt @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict)
+  items               OrderItem[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  String   @id @default(uuid()) @db.Uuid
+  orderId             String   @map("order_id") @db.Uuid
+  productId           String   @map("product_id") @db.Uuid
+  productNameSnapshot String   @map("product_name_snapshot") @db.VarChar(150)
+  unitPrice           Decimal  @map("unit_price") @db.Decimal(10, 2)
+  quantity            Int
+  lineTotal           Decimal  @map("line_total") @db.Decimal(12, 2)
+  order               Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, productId])
+  @@map("order_items")
+}
+
+/// Outbox transaccional de Commerce; la entrega a audit-service corresponde a M07.
+model OutboxEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  eventType    String    @map("event_type") @db.VarChar(50)
+  result       String    @db.VarChar(20)
+  actorId      String?   @map("actor_id") @db.Uuid
+  actorRole    String?   @map("actor_role") @db.VarChar(20)
+  resourceType String    @map("resource_type") @db.VarChar(40)
+  resourceId   String?   @map("resource_id") @db.Uuid
+  sourceIp     String?   @map("source_ip") @db.VarChar(64)
+  requestId    String?   @map("request_id") @db.Uuid
+  metadata     Json
+  occurredAt   DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  publishedAt  DateTime? @map("published_at") @db.Timestamptz(3)
+
+  @@index([publishedAt, occurredAt])
+  @@map("outbox_events")
 }

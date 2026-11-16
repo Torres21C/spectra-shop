@@ -4,7 +4,7 @@ Aplicación académica de comercio electrónico cloud-native. El código vive en
 
 ## Estado
 
-M01 Catálogo y M02 Identidad están integrados en `main`. El Incremento 3 se desarrolla en `feature/m03-carrito`: M03 incorpora un carrito persistente por cliente, cálculo monetario en el servidor, revalidación contra Catalog y autorización apoyada en Identity. No existe despliegue en AWS ni integración con pagos reales.
+M01 Catálogo, M02 Identidad y M03 Carrito están integrados en `main`. El Incremento 4 se desarrolla en `feature/m04-checkout`: M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
 
 ## Arquitectura
 
@@ -36,7 +36,9 @@ openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
 openssl pkey -in /ruta/privada/spectra-dev-keys/private.pem -pubout \
   -out /ruta/privada/spectra-dev-keys/public.pem
 
-# Genere el token interno fuera del repositorio y copie el valor únicamente a .env.
+# Genere fuera del repositorio dos tokens distintos y copie los valores únicamente a .env:
+# SPECTRA_INTERNAL_TOKEN(S) para lecturas internas y CATALOG_INVENTORY_TOKEN(S) para inventario.
+openssl rand -hex 32
 openssl rand -hex 32
 
 npm run build
@@ -53,7 +55,7 @@ Una vez que los contenedores estén saludables:
 - OpenAPI JSON: <http://127.0.0.1:3002/docs-json>.
 - API de identidad: <http://127.0.0.1:3001/auth/csrf>;
 - Swagger de identidad: <http://127.0.0.1:3001/docs>.
-- API de carrito: <http://127.0.0.1:3003/cart>;
+- API de carrito y checkout: <http://127.0.0.1:3003/cart>, <http://127.0.0.1:3003/checkout/summary>;
 - Swagger de Commerce: <http://127.0.0.1:3003/docs>.
 
 Las migraciones y seeds se ejecutan de forma idempotente al iniciar los servicios. PostgreSQL no publica su puerto al host. Las claves ES256 y la credencial interna se suministran desde rutas o variables locales no versionadas. Los listeners internos de Catalog (`3102`) e Identity (`3101`) sólo existen en la red privada de Compose y no se publican al host.
@@ -71,7 +73,7 @@ docker compose --profile test run --rm identity-test
 docker compose --profile test run --rm commerce-test
 ```
 
-Las tres últimas órdenes ejecutan las pruebas de integración contra PostgreSQL dentro de la red privada de Compose. `identity-test` levanta un servidor HTTPS local con un certificado efímero y comprueba cookies `Secure` reales. `commerce-test` usa comunicación HTTP real entre Commerce, Catalog e Identity; las claves y el token interno siguen siendo obligatorios.
+Las tres últimas órdenes ejecutan las pruebas de integración contra PostgreSQL dentro de la red privada de Compose. `identity-test` levanta un servidor HTTPS local con un certificado efímero y comprueba cookies `Secure` reales. `commerce-test` usa comunicación HTTP real entre Commerce, Catalog e Identity; las claves y los tokens internos siguen siendo obligatorios. Las pruebas M04 interponen un proxy HTTP de fallos entre Commerce y Catalog para reproducir caídas, respuestas perdidas, vencimientos y reinicios sin alterar el código productivo.
 
 ## API M01
 
@@ -107,12 +109,50 @@ Commerce verifica localmente firma, algoritmo, emisor, audiencia y expiración d
 | `PATCH`  | `/cart/items/:itemId` | Reemplaza la cantidad de una línea propia            |
 | `DELETE` | `/cart/items/:itemId` | Elimina una línea propia y recalcula el total        |
 
-Sólo el rol `CLIENTE` puede usar estas rutas. Las mutaciones requieren cookie de sesión, token CSRF y `Origin` permitido. El servidor rechaza campos no declarados y calcula en GTQ con `Decimal`, redondeo `HALF_UP` y dos decimales. Una indisponibilidad de Catalog o Identity produce `503`; no se usan precios ni totales obsoletos. El checkout se muestra deshabilitado hasta M04.
+Sólo el rol `CLIENTE` puede usar estas rutas. Las mutaciones requieren cookie de sesión, token CSRF y `Origin` permitido. El servidor rechaza campos no declarados y calcula en GTQ con `Decimal`, redondeo `HALF_UP` y dos decimales. Una indisponibilidad de Catalog o Identity produce `503`; no se usan precios ni totales obsoletos. Mientras un checkout está en curso, el carrito queda congelado (`409 CART_LOCKED_FOR_CHECKOUT`).
 
 La comunicación interna usa un token aleatorio de al menos 32 caracteres comparado en tiempo constante. `SPECTRA_INTERNAL_TOKENS` acepta el token actual y el anterior durante una rotación; Commerce envía sólo el actual. En una futura implantación AWS, la interfaz de configuración permitirá obtener la credencial desde Secrets Manager y las claves ES256 desde KMS, sin que M03 despliegue ni consuma esos servicios.
 
-### Límite de M03
+## API M04
 
-M03 no reserva stock ni crea pedidos. La ERS solicita una transacción ACID para la compra, mientras que la arquitectura distribuida contempla una saga entre Commerce y Catalog para M04. Esa contradicción sigue pendiente de resolución formal antes de implementar checkout. Completar M03 no completa las Fases 3 ni 4.
+| Método | Ruta                | Función                                                                  |
+| ------ | ------------------- | ------------------------------------------------------------------------ |
+| `GET`  | `/checkout/summary` | Resumen recalculado en servidor y huella (`fingerprint`) del resumen     |
+| `POST` | `/orders`           | Confirma el pedido con pago simulado; exige `Idempotency-Key` (UUID v4)  |
+| `GET`  | `/orders/:orderId`  | Confirmación de un pedido propio; pedido ajeno o inexistente → 404 igual |
+
+Cuerpo de `POST /orders`: datos de entrega ficticios (`recipientName`, `phone`, `department`, `municipality`, `address`, `references` opcional), `simulatedPaymentResult` (`APROBADO` o `RECHAZADO`) y `cartFingerprint`. Cualquier otro campo —`total`, `price`, `userId`, `cardNumber`, `cvv`…— se rechaza con `400`. El total es la suma de precios persistidos × cantidad, congelados en `order_items`.
+
+| Resultado                      | HTTP | Código                                               |
+| ------------------------------ | ---- | ---------------------------------------------------- |
+| Pedido creado                  | 201  | —                                                    |
+| Reenvío con la misma clave     | 200  | — (mismo pedido)                                     |
+| Pago simulado rechazado        | 422  | `PAYMENT_SIMULATED_REJECTED`                         |
+| Stock insuficiente             | 409  | `CHECKOUT_STOCK_CONFLICT` (con líneas afectadas)     |
+| Precio o cantidades cambiadas  | 409  | `CHECKOUT_SUMMARY_CHANGED`                           |
+| Confirmación en curso          | 409  | `CHECKOUT_IN_PROGRESS`                               |
+| Clave reutilizada / vencida    | 422  | `IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_KEY_EXPIRED` |
+| Saga pendiente (fallo técnico) | 503  | `CHECKOUT_PENDING`: reintentar con la misma clave    |
+| Límite por cuenta              | 429  | `CHECKOUT_RATE_LIMITED`                              |
+
+### Saga de checkout
+
+Commerce orquesta la compra con transacciones ACID locales y sin acceder a tablas de Catalog:
+
+1. **C1 · Commerce**: crea el intento `STARTED` por (usuario, `Idempotency-Key`) con el carrito bloqueado; un índice único parcial permite un solo checkout en curso por carrito.
+2. **Validación**: precios y stock vigentes desde Catalog, huella del resumen y resultado del pago simulado. Un rechazo termina aquí sin tocar stock.
+3. **R · Catalog**: reserva todo-o-nada con `UPDATE … WHERE stock >= cantidad AND precio = esperado`, en orden por producto, más `CHECK stock >= 0`.
+4. **K · Catalog**: confirmación, el punto de no retorno; rechaza reservas vencidas según el reloj de la base de datos.
+5. **C3 · Commerce**: pedido `PAGADO`, líneas con precio congelado, carrito `CONVERTIDO` y evento `ORDER_CREATED` en la outbox, todo en una transacción local.
+
+Compensación y recuperación: si la saga no llega a **K**, la reserva se libera de forma idempotente. Catalog libera además las reservas `PENDING` vencidas (barrido periódico y al arrancar). Commerce reconcilia al arrancar y periódicamente los intentos cuyo arrendamiento venció: hacia atrás si Catalog no confirmó, hacia adelante si ya confirmó. Los estados técnicos de la saga (`checkout_attempts.state`) están separados de los estados de negocio del pedido (`orders.status`).
+
+Los endpoints internos de inventario (`/internal/catalog/stock-reservations`) existen solo en el listener `3102` y exigen `CATALOG_INVENTORY_TOKEN(S)`, distinto del token compartido de lectura.
+
+### Límites de M04
+
+- La entrega de la outbox a `audit-service` corresponde a M07; los eventos quedan persistidos en `commerce.outbox_events`.
+- Los servicios comparten un usuario PostgreSQL local; los roles por esquema siguen pendientes.
+- DAST/ZAP, TLS y controles AWS no están implementados. Completar M04 no completa las Fases 3 ni 4.
 
 Consulte [CONTRIBUTING.md](CONTRIBUTING.md) y [SECURITY.md](SECURITY.md) antes de proponer cambios.
