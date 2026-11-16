@@ -62,6 +62,7 @@ jobs:
           openssl pkey -in "$keys_dir/private.pem" -pubout -out "$keys_dir/public.pem"
           chmod 600 "$keys_dir/private.pem"
           internal_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$internal_token"
           echo "SPECTRA_KEYS_DIR=$keys_dir" >> "$GITHUB_ENV"
           echo "SPECTRA_INTERNAL_TOKEN=$internal_token" >> "$GITHUB_ENV"
           echo "SPECTRA_INTERNAL_TOKENS=$internal_token" >> "$GITHUB_ENV"
@@ -73,6 +74,7 @@ jobs:
           npm run prisma:generate --workspace @spectra/identity-service
           npm run db:deploy --workspace @spectra/identity-service
           npm run db:seed:dev --workspace @spectra/identity-service
+          npm run prisma:generate --workspace @spectra/commerce-service
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
