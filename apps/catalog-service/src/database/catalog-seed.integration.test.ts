@@ -7,9 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // M06.0: el seed de Catalog es idempotente y nunca sobrescribe productos existentes (antes restablecía
 // stock y precios en cada despliegue, deshaciendo el descuento de pedidos confirmados).
-const SOLD = '20000000-0000-4000-8000-000000000014';
-const EDITED = '20000000-0000-4000-8000-000000000012';
-const MISSING = '20000000-0000-4000-8000-000000000004';
+// Productos del seed que ninguna otra suite usa: SP-AUD-002 (activo), SP-KEY-001 (activo) y
+// SP-KEY-LEGACY (inactivo, fuera del listado público). Se restauran al terminar.
+const SOLD = '20000000-0000-4000-8000-000000000004';
+const EDITED = '20000000-0000-4000-8000-000000000001';
+const MISSING = '20000000-0000-4000-8000-000000000014';
 const PRODUCTS = [SOLD, EDITED, MISSING];
 const ROOT = '/internal/catalog/stock-reservations';
 
