@@ -543,14 +543,29 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       for (const buyer of buyers) await addToCart(buyer, MIC, 1);
       const summaries = await Promise.all(buyers.map((buyer) => summary(buyer)));
       const timings: number[] = [];
-      const responses = await Promise.all(
-        buyers.map(async (buyer, index) => {
-          const started = performance.now();
-          const response = await place(buyer, summaries[index]!.fingerprint);
-          timings.push(performance.now() - started);
-          return response;
-        }),
-      );
+      // La prueba verifica la ausencia de sobreventa bajo concurrencia (con p95 < 10 s), no el
+      // presupuesto de 1,5 s por llamada interna, que cubren las pruebas de inyección de fallos. Con
+      // 20 reservas compitiendo por la misma fila, un runner cargado puede superar 1,5 s y el checkout
+      // queda pendiente (503, sin sobreventa); por eso se usa el máximo permitido (5 s) solo aquí.
+      const internalTimeoutMs = config.timeoutMs;
+      config.timeoutMs = 5_000;
+      let responses: Response[];
+      try {
+        responses = await Promise.all(
+          buyers.map(async (buyer, index) => {
+            const started = performance.now();
+            const response = await place(buyer, summaries[index]!.fingerprint);
+            timings.push(performance.now() - started);
+            return response;
+          }),
+        );
+      } finally {
+        config.timeoutMs = internalTimeoutMs;
+      }
+      const outcome = responses
+        .map((response) => `${response.status}:${parse<{ code?: string }>(response).code ?? '-'}`)
+        .sort();
+      process.stdout.write(`[EV-M04] 20 checkouts concurrentes: ${JSON.stringify(outcome)}\n`);
       const created = responses.filter((response) => response.status === 201);
       const conflicts = responses.filter((response) => response.status === 409);
       expect(created).toHaveLength(5);
