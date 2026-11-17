@@ -69,10 +69,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
     });
 
     async function cleanup(): Promise<void> {
-      await fixtures.$executeRawUnsafe(
-        'DROP TRIGGER IF EXISTS m06_block_outbox ON "catalog"."outbox_events"',
-      );
-      await fixtures.$executeRawUnsafe('DROP FUNCTION IF EXISTS "catalog"."m06_block_outbox"()');
+      await fixtures.$executeRaw`DROP TRIGGER IF EXISTS m06_block_outbox ON "catalog"."outbox_events"`;
+      await fixtures.$executeRaw`DROP FUNCTION IF EXISTS "catalog"."m06_block_outbox"()`;
       await fixtures.outboxEvent.deleteMany();
       await fixtures.product.deleteMany({ where: { sku: { startsWith: 'TST-M06-' } } });
     }
@@ -178,10 +176,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
     });
 
     it('is atomic: if the outbox write fails, the product is not created (fail-closed)', async () => {
-      await fixtures.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION "catalog"."m06_block_outbox"() RETURNS trigger
-        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic outbox failure'; END $$`);
-      await fixtures.$executeRawUnsafe(`CREATE TRIGGER m06_block_outbox BEFORE INSERT ON "catalog"."outbox_events"
-        FOR EACH ROW EXECUTE FUNCTION "catalog"."m06_block_outbox"()`);
+      await fixtures.$executeRaw`CREATE OR REPLACE FUNCTION "catalog"."m06_block_outbox"() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic outbox failure'; END $$`;
+      await fixtures.$executeRaw`CREATE TRIGGER m06_block_outbox BEFORE INSERT ON "catalog"."outbox_events"
+        FOR EACH ROW EXECUTE FUNCTION "catalog"."m06_block_outbox"()`;
       const body = product();
       const response = await create(body);
       expect(response.status).toBe(500);

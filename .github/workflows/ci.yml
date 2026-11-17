@@ -87,6 +87,7 @@ jobs:
           npm run db:deploy --workspace @spectra/identity-service
           npm run db:seed:dev --workspace @spectra/identity-service
           npm run prisma:generate --workspace @spectra/commerce-service
+          npm run prisma:generate --workspace @spectra/audit-service
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck

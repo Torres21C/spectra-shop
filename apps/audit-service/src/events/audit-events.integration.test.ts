@@ -117,9 +117,9 @@ describe.skipIf(!process.env.AUDIT_DATABASE_URL)(
     it('is append-only for the runtime role: UPDATE and DELETE are denied by PostgreSQL', async () => {
       expect((await ingest({ events: [event()] })).status).toBe(202);
       await expect(
-        runtime.$executeRawUnsafe(`UPDATE "audit"."audit_events" SET "result" = 'FALLO'`),
+        runtime.$executeRaw`UPDATE "audit"."audit_events" SET "result" = 'FALLO'`,
       ).rejects.toThrow(/permission denied/i);
-      await expect(runtime.$executeRawUnsafe(`DELETE FROM "audit"."audit_events"`)).rejects.toThrow(
+      await expect(runtime.$executeRaw`DELETE FROM "audit"."audit_events"`).rejects.toThrow(
         /permission denied/i,
       );
       expect(await fixtures.auditEvent.count()).toBe(1);
