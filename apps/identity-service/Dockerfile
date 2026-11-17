@@ -24,4 +24,5 @@ COPY --from=build --chown=node:node /workspace/apps/identity-service/dist /app/d
 COPY --from=build --chown=node:node /workspace/apps/identity-service/prisma /app/prisma
 COPY --from=build --chown=node:node /workspace/apps/identity-service/src/generated/identity-client /app/dist/generated/identity-client
 EXPOSE 3001
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && node dist/database/seed.js && node dist/main.js"]
+# DT-09: el contenedor de ejecución no migra ni siembra; lo hace el job `identity-migrate` con el rol migrador.
+CMD ["node", "dist/main.js"]

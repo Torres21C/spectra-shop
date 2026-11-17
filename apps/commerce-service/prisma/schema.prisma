@@ -14,12 +14,12 @@ enum CartStatus {
 }
 
 model Cart {
-  id        String     @id @default(uuid()) @db.Uuid
-  userId    String     @map("user_id") @db.Uuid
-  status    CartStatus @default(ACTIVO)
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
-  items     CartItem[]
+  id               String            @id @default(uuid()) @db.Uuid
+  userId           String            @map("user_id") @db.Uuid
+  status           CartStatus        @default(ACTIVO)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+  items            CartItem[]
   checkoutAttempts CheckoutAttempt[]
 
   @@index([userId, status])
@@ -67,69 +67,81 @@ enum SimulatedPaymentResult {
 
 /// Intento de checkout identificado por (usuario, Idempotency-Key). Persistencia de la saga.
 model CheckoutAttempt {
-  id               String                 @id @default(uuid()) @db.Uuid
-  userId           String                 @map("user_id") @db.Uuid
-  cartId           String                 @map("cart_id") @db.Uuid
-  idempotencyKey   String                 @map("idempotency_key") @db.Uuid
-  requestHash      String                 @map("request_hash") @db.Char(64)
-  cartFingerprint  String                 @map("cart_fingerprint") @db.Char(64)
-  state            CheckoutState
-  reservationId    String                 @unique @map("reservation_id") @db.Uuid
-  leaseOwner       String?                @map("lease_owner") @db.Uuid
-  leaseUntil       DateTime?              @map("lease_until") @db.Timestamptz(3)
-  paymentResult    SimulatedPaymentResult @map("payment_result")
-  lines            Json
-  pricedLines      Json?                  @map("priced_lines")
-  shipping         Json?
-  failureCode      String?                @map("failure_code") @db.VarChar(40)
-  failureDetails   Json?                  @map("failure_details")
-  orderId          String?                @unique @map("order_id") @db.Uuid
-  recoveryAttempts Int                    @default(0) @map("recovery_attempts")
+  id                       String                 @id @default(uuid()) @db.Uuid
+  userId                   String                 @map("user_id") @db.Uuid
+  cartId                   String                 @map("cart_id") @db.Uuid
+  idempotencyKey           String                 @map("idempotency_key") @db.Uuid
+  requestHash              String                 @map("request_hash") @db.Char(64)
+  cartFingerprint          String                 @map("cart_fingerprint") @db.Char(64)
+  state                    CheckoutState
+  reservationId            String                 @unique @map("reservation_id") @db.Uuid
+  leaseOwner               String?                @map("lease_owner") @db.Uuid
+  leaseUntil               DateTime?              @map("lease_until") @db.Timestamptz(3)
+  paymentResult            SimulatedPaymentResult @map("payment_result")
+  lines                    Json
+  pricedLines              Json?                  @map("priced_lines")
+  shipping                 Json?
+  failureCode              String?                @map("failure_code") @db.VarChar(40)
+  failureDetails           Json?                  @map("failure_details")
+  orderId                  String?                @unique @map("order_id") @db.Uuid
+  recoveryAttempts         Int                    @default(0) @map("recovery_attempts")
   /// M04.1: no reintentar antes de esta fecha (backoff exponencial acotado).
-  nextRecoveryAt   DateTime?              @map("next_recovery_at") @db.Timestamptz(3)
+  nextRecoveryAt           DateTime?              @map("next_recovery_at") @db.Timestamptz(3)
   /// M04.1: último error de recuperación, como código en lista blanca (nunca mensajes ni datos).
-  lastRecoveryError String?               @map("last_recovery_error") @db.VarChar(40)
+  lastRecoveryError        String?                @map("last_recovery_error") @db.VarChar(40)
   /// M04.1: momento en que la saga se declaró atascada y se emitió la alerta (una sola vez).
-  stuckSince       DateTime?              @map("stuck_since") @db.Timestamptz(3)
-  expiresAt        DateTime               @map("expires_at") @db.Timestamptz(3)
-  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
-  cart             Cart                   @relation(fields: [cartId], references: [id], onDelete: Restrict)
-  order            Order?
+  stuckSince               DateTime?              @map("stuck_since") @db.Timestamptz(3)
+  /// DT-08: Catalog reconoció la reserva con el pedido (FULFILLED). Solo en intentos COMPLETED.
+  inventoryFulfilledAt     DateTime?              @map("inventory_fulfilled_at") @db.Timestamptz(3)
+  /// DT-08: reintentos del reconocimiento, separados de la recuperación de la saga (M04.1).
+  fulfillmentAttempts      Int                    @default(0) @map("fulfillment_attempts")
+  fulfillmentNextAttemptAt DateTime?              @map("fulfillment_next_attempt_at") @db.Timestamptz(3)
+  /// DT-08: último error del reconocimiento, como código en lista blanca.
+  fulfillmentLastError     String?                @map("fulfillment_last_error") @db.VarChar(40)
+  /// DT-08: momento en que el reconocimiento se declaró atascado (alerta única).
+  fulfillmentStuckSince    DateTime?              @map("fulfillment_stuck_since") @db.Timestamptz(3)
+  fulfillmentLeaseOwner    String?                @map("fulfillment_lease_owner") @db.Uuid
+  fulfillmentLeaseUntil    DateTime?              @map("fulfillment_lease_until") @db.Timestamptz(3)
+  expiresAt                DateTime               @map("expires_at") @db.Timestamptz(3)
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  cart                     Cart                   @relation(fields: [cartId], references: [id], onDelete: Restrict)
+  order                    Order?
 
   @@unique([userId, idempotencyKey])
   @@index([state, leaseUntil])
   @@index([state, nextRecoveryAt])
+  @@index([state, inventoryFulfilledAt, fulfillmentNextAttemptAt], map: "checkout_attempts_fulfillment_pending_idx")
   @@index([userId, createdAt])
   @@map("checkout_attempts")
 }
 
 model Order {
-  id                  String          @id @default(uuid()) @db.Uuid
-  orderNumber         String          @unique @default(dbgenerated("('SP-'::text || nextval('commerce.order_number_seq'::regclass))")) @map("order_number") @db.VarChar(20)
-  userId              String          @map("user_id") @db.Uuid
-  idempotencyKey      String          @map("idempotency_key") @db.Uuid
-  checkoutAttemptId   String          @unique @map("checkout_attempt_id") @db.Uuid
-  status              OrderStatus     @default(PAGADO)
-  total               Decimal         @db.Decimal(12, 2)
-  currency            String          @default("GTQ") @db.Char(3)
-  shippingName        String          @map("shipping_name") @db.VarChar(80)
-  shippingPhone       String          @map("shipping_phone") @db.VarChar(9)
-  shippingDepartment  String          @map("shipping_department") @db.VarChar(40)
-  shippingMunicipality String         @map("shipping_municipality") @db.VarChar(60)
-  shippingAddress     String          @map("shipping_address") @db.VarChar(150)
-  shippingReferences  String?         @map("shipping_references") @db.VarChar(200)
-  paymentReference    String          @unique @map("payment_reference") @db.VarChar(32)
-  paidAt              DateTime        @map("paid_at") @db.Timestamptz(3)
+  id                   String          @id @default(uuid()) @db.Uuid
+  orderNumber          String          @unique @default(dbgenerated("('SP-'::text || nextval('commerce.order_number_seq'::regclass))")) @map("order_number") @db.VarChar(20)
+  userId               String          @map("user_id") @db.Uuid
+  idempotencyKey       String          @map("idempotency_key") @db.Uuid
+  checkoutAttemptId    String          @unique @map("checkout_attempt_id") @db.Uuid
+  status               OrderStatus     @default(PAGADO)
+  total                Decimal         @db.Decimal(12, 2)
+  currency             String          @default("GTQ") @db.Char(3)
+  shippingName         String          @map("shipping_name") @db.VarChar(80)
+  shippingPhone        String          @map("shipping_phone") @db.VarChar(9)
+  shippingDepartment   String          @map("shipping_department") @db.VarChar(40)
+  shippingMunicipality String          @map("shipping_municipality") @db.VarChar(60)
+  shippingAddress      String          @map("shipping_address") @db.VarChar(150)
+  shippingReferences   String?         @map("shipping_references") @db.VarChar(200)
+  paymentReference     String          @unique @map("payment_reference") @db.VarChar(32)
+  paidAt               DateTime        @map("paid_at") @db.Timestamptz(3)
   /// M05 (D-M05-01): línea de tiempo por columnas de fecha; las escribe M06 al cambiar el estado.
-  preparingAt         DateTime?       @map("preparing_at") @db.Timestamptz(3)
-  shippedAt           DateTime?       @map("shipped_at") @db.Timestamptz(3)
-  deliveredAt         DateTime?       @map("delivered_at") @db.Timestamptz(3)
-  cancelledAt         DateTime?       @map("cancelled_at") @db.Timestamptz(3)
-  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
-  attempt             CheckoutAttempt @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict)
-  items               OrderItem[]
+  preparingAt          DateTime?       @map("preparing_at") @db.Timestamptz(3)
+  shippedAt            DateTime?       @map("shipped_at") @db.Timestamptz(3)
+  deliveredAt          DateTime?       @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt          DateTime?       @map("cancelled_at") @db.Timestamptz(3)
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  attempt              CheckoutAttempt @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict)
+  items                OrderItem[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt(sort: Desc), id(sort: Desc)], map: "orders_user_id_created_at_id_idx")
@@ -137,14 +149,14 @@ model Order {
 }
 
 model OrderItem {
-  id                  String   @id @default(uuid()) @db.Uuid
-  orderId             String   @map("order_id") @db.Uuid
-  productId           String   @map("product_id") @db.Uuid
-  productNameSnapshot String   @map("product_name_snapshot") @db.VarChar(150)
-  unitPrice           Decimal  @map("unit_price") @db.Decimal(10, 2)
+  id                  String  @id @default(uuid()) @db.Uuid
+  orderId             String  @map("order_id") @db.Uuid
+  productId           String  @map("product_id") @db.Uuid
+  productNameSnapshot String  @map("product_name_snapshot") @db.VarChar(150)
+  unitPrice           Decimal @map("unit_price") @db.Decimal(10, 2)
   quantity            Int
-  lineTotal           Decimal  @map("line_total") @db.Decimal(12, 2)
-  order               Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  lineTotal           Decimal @map("line_total") @db.Decimal(12, 2)
+  order               Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   @@unique([orderId, productId])
   @@map("order_items")

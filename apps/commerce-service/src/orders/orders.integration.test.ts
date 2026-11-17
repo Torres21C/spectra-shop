@@ -45,7 +45,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
   () => {
     let app: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/commerce-client/index.js').PrismaClient;
     let config: typeof import('../config/commerce.config.js').commerceConfig;
     let catalogDb: Pool;
     let identityDb: Pool;
@@ -133,9 +134,9 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
         access: configModule.accessCookieName(),
         csrf: configModule.csrfCookieName(),
       };
-      const [{ AppModule }, prismaModule] = await Promise.all([
+      const [{ AppModule }, fixtureModule] = await Promise.all([
         import('../app.module.js'),
-        import('../database/prisma.service.js'),
+        import('../test-support/fixture-client.js'),
       ]);
       const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
       app = moduleRef.createNestApplication();
@@ -150,7 +151,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       );
       await app.init();
       server = app.getHttpServer() as Server;
-      prisma = app.get(prismaModule.PrismaService);
+      prisma = fixtureModule.createFixtureClient();
       [ana, bruno, carla, admin] = await Promise.all([buyer(), buyer(), buyer(), buyer('ADMIN')]);
     });
 
@@ -175,6 +176,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
           [micOriginal.price, micOriginal.stock, micOriginal.name, micOriginal.is_active, MIC],
         );
       }
+      await prisma?.$disconnect();
       await Promise.all([catalogDb?.end(), identityDb?.end()]);
     });
 

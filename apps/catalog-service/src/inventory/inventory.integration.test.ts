@@ -27,7 +27,8 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
     let app: INestApplication;
     let publicApp: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('@prisma/client').PrismaClient;
     let sweeper: InstanceType<
       typeof import('./reservation-sweeper.service.js').ReservationSweeperService
     >;
@@ -62,14 +63,13 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
     beforeAll(async () => {
       process.env.RESERVATION_SWEEP_INTERVAL_MS = '0';
       token = process.env.CATALOG_INVENTORY_TOKENS!.split(',')[0]!.trim();
-      const [{ InternalAppModule }, { AppModule }, prismaModule, sweeperModule] = await Promise.all(
-        [
+      const [{ InternalAppModule }, { AppModule }, fixtureModule, sweeperModule] =
+        await Promise.all([
           import('../internal-app.module.js'),
           import('../app.module.js'),
-          import('../database/prisma.service.js'),
+          import('../test-support/fixture-client.js'),
           import('./reservation-sweeper.service.js'),
-        ],
-      );
+        ]);
       const pipe = new ValidationPipe({
         whitelist: true,
         forbidNonWhitelisted: true,
@@ -85,7 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
         .useGlobalPipes(pipe);
       await publicApp.init();
       server = app.getHttpServer() as Server;
-      prisma = app.get(prismaModule.PrismaService);
+      prisma = fixtureModule.createFixtureClient();
       sweeper = app.get(sweeperModule.ReservationSweeperService);
       original = (await prisma.product.findMany({ where: { id: { in: PRODUCTS } } })).map(
         (product) => ({
@@ -121,6 +121,7 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
       }
       await app?.close();
       await publicApp?.close();
+      await prisma?.$disconnect();
     });
 
     it('reserves all lines atomically, freezing prices and deducting stock', async () => {
@@ -177,7 +178,17 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
     });
 
     it('prevents overselling under concurrency: 20 buyers, 5 units, and 2 buyers for the last unit', async () => {
+      const startedAt = performance.now();
       const results = await Promise.all(Array.from({ length: 20 }, () => reserve([line(HUB, 1)])));
+      // Duración observable en la evidencia; la corrección la deciden las aserciones siguientes.
+      process.stdout.write(
+        `${JSON.stringify({
+          event: 'concurrency_20_reservations',
+          ms: Math.round(performance.now() - startedAt),
+          statuses: results.map((response) => response.status).sort(),
+        })}\n`,
+      );
+      expect(results.every((response) => [201, 409].includes(response.status))).toBe(true);
       expect(results.filter((response) => response.status === 201)).toHaveLength(5);
       expect(results.filter((response) => response.status === 409)).toHaveLength(15);
       expect(await stock(HUB)).toBe(0);

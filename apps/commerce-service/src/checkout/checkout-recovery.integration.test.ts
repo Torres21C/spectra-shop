@@ -7,7 +7,7 @@ import type { ApiErrorResponse, CheckoutSummary, OrderConfirmation } from '@spec
 import cookieParser from 'cookie-parser';
 import { Pool } from 'pg';
 import supertest, { type Response } from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FaultProxy } from '../test-support/fault-proxy.js';
 import { ORIGIN, SyntheticBuyer } from '../test-support/identity-agents.js';
 
@@ -39,7 +39,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
   () => {
     let app: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/commerce-client/index.js').PrismaClient;
     let recovery: Recovery;
     let config: typeof import('../config/commerce.config.js').commerceConfig;
     let helpers: typeof import('./checkout.service.js');
@@ -180,7 +181,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       config.checkoutAttemptsPerMinute = 1_000;
       ({ app, recovery } = await boot());
       server = app.getHttpServer() as Server;
-      prisma = app.get((await import('../database/prisma.service.js')).PrismaService);
+      prisma = (await import('../test-support/fixture-client.js')).createFixtureClient();
     });
 
     beforeEach(async () => {
@@ -212,6 +213,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       }
       Object.assign(config, defaults);
       await app?.close();
+      await prisma?.$disconnect();
       await proxy?.stop();
       if (catalogDb && original) {
         await catalogDb.query('DELETE FROM catalog.stock_reservation_lines');
@@ -251,68 +253,85 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
 
       const delays: number[] = [];
       const alerts: (readonly string[])[] = [];
-      for (let run = 1; run <= 5; run += 1) {
-        await waitUntilDue(attemptId);
-        const before = Date.now();
-        const report = await recovery.runOnce();
-        expect(report.outcomes.DEFERRED).toBe(1);
-        alerts.push(report.newlyStuck);
-        const attempt = await prisma.checkoutAttempt.findUniqueOrThrow({
-          where: { id: attemptId },
+      const recoveryAttempts = async () =>
+        (await prisma.checkoutAttempt.findUniqueOrThrow({ where: { id: attemptId } }))
+          .recoveryAttempts;
+      // Reloj controlado: solo se sustituye `Date` (el backoff y los arrendamientos se comparan con
+      // el reloj de Node). Temporizadores, red y PostgreSQL siguen siendo reales. Así la prueba no
+      // depende de que dos pasadas ocurran dentro de una ventana real de 50 ms.
+      vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 1 });
+      try {
+        for (let run = 1; run <= 5; run += 1) {
+          // Vencimiento exacto del backoff anterior (la primera pasada no tiene backoff).
+          const due = (await prisma.checkoutAttempt.findUniqueOrThrow({ where: { id: attemptId } }))
+            .nextRecoveryAt;
+          if (due) vi.setSystemTime(due);
+          const before = Date.now();
+          const report = await recovery.runOnce();
+          expect(report.outcomes.DEFERRED).toBe(1);
+          alerts.push(report.newlyStuck);
+          const attempt = await prisma.checkoutAttempt.findUniqueOrThrow({
+            where: { id: attemptId },
+          });
+          expect(attempt).toMatchObject({
+            state: 'CONFIRMED',
+            recoveryAttempts: run,
+            lastRecoveryError: 'PERSISTENCE_ERROR',
+          });
+          delays.push(attempt.nextRecoveryAt!.getTime() - before);
+
+          // Antes del vencimiento (mismo instante y 1 ms antes) no hay reintento ni consumo de intentos.
+          const idleNow = await recovery.runOnce();
+          expect(idleNow.outcomes).toEqual({ SKIPPED: 0, COMPLETED: 0, ABORTED: 0, DEFERRED: 0 });
+          vi.setSystemTime(attempt.nextRecoveryAt!.getTime() - 1);
+          const idleJustBefore = await recovery.runOnce();
+          expect(idleJustBefore.outcomes).toEqual({
+            SKIPPED: 0,
+            COMPLETED: 0,
+            ABORTED: 0,
+            DEFERRED: 0,
+          });
+          expect(await recoveryAttempts()).toBe(run);
+          expect(await prisma.order.count()).toBe(0);
+        }
+        // Backoff exacto (reloj controlado): 50, 100, 200 y 400 ms (tope).
+        expect(delays).toEqual([50, 100, 200, 400, 400]);
+        // Alerta única al alcanzar 3 reintentos (CHECKOUT_STUCK_ATTEMPTS = 3).
+        expect(alerts.map((ids) => ids.length)).toEqual([0, 0, 1, 0, 0]);
+        const stuckEvents = await prisma.outboxEvent.findMany({
+          where: { eventType: 'CHECKOUT_SAGA_STUCK' },
         });
-        expect(attempt).toMatchObject({
+        expect(stuckEvents).toHaveLength(1);
+        expect(stuckEvents[0]).toMatchObject({ resourceId: attemptId, result: 'FALLO' });
+        expect(stuckEvents[0]!.metadata).toMatchObject({
           state: 'CONFIRMED',
-          recoveryAttempts: run,
+          pointOfNoReturn: 'yes',
           lastRecoveryError: 'PERSISTENCE_ERROR',
         });
-        delays.push(attempt.nextRecoveryAt!.getTime() - before);
+        const metrics = (await recovery.runOnce()).metrics!;
+        expect(metrics).toMatchObject({ stuck: 1, inflightTotal: 1, maxRecoveryAttempts: 5 });
+        expect(metrics.inflight.CONFIRMED).toBe(1);
 
-        // Dentro del backoff no hay reintento silencioso ni consumo de intentos.
-        const idle = await recovery.runOnce();
-        expect(idle.outcomes).toEqual({ SKIPPED: 0, COMPLETED: 0, ABORTED: 0, DEFERRED: 0 });
+        // Nunca se abandona tras el punto de no retorno: reserva confirmada, stock descontado una vez.
+        expect(await reservationStatus(reservationId)).toBe('CONFIRMED');
+        expect(await stock()).toBe(4);
+        expect(await prisma.order.count()).toBe(0);
+
+        // Un reenvío del cliente durante el backoff no fuerza la recuperación.
+        const attemptsBeforeReplay = (
+          await prisma.checkoutAttempt.findUniqueOrThrow({ where: { id: attemptId } })
+        ).recoveryAttempts;
+        const csrf = await who.csrf();
+        const replayDuringBackoff = await placeOrder(who, csrf, key, fingerprint);
+        expect(replayDuringBackoff.status).toBe(503);
+        expect(parse<ApiErrorResponse>(replayDuringBackoff).code).toBe('CHECKOUT_PENDING');
         expect(
           (await prisma.checkoutAttempt.findUniqueOrThrow({ where: { id: attemptId } }))
             .recoveryAttempts,
-        ).toBe(run);
+        ).toBe(attemptsBeforeReplay);
+      } finally {
+        vi.useRealTimers();
       }
-      // 50, 100, 200, 400, 400 ms (tope), con tolerancia de reloj.
-      [50, 100, 200, 400, 400].forEach((expected, index) => {
-        expect(delays[index]).toBeGreaterThanOrEqual(expected - 15);
-        expect(delays[index]).toBeLessThanOrEqual(expected + 250);
-      });
-      // Alerta única al alcanzar 3 reintentos (CHECKOUT_STUCK_ATTEMPTS = 3).
-      expect(alerts.map((ids) => ids.length)).toEqual([0, 0, 1, 0, 0]);
-      const stuckEvents = await prisma.outboxEvent.findMany({
-        where: { eventType: 'CHECKOUT_SAGA_STUCK' },
-      });
-      expect(stuckEvents).toHaveLength(1);
-      expect(stuckEvents[0]).toMatchObject({ resourceId: attemptId, result: 'FALLO' });
-      expect(stuckEvents[0]!.metadata).toMatchObject({
-        state: 'CONFIRMED',
-        pointOfNoReturn: 'yes',
-        lastRecoveryError: 'PERSISTENCE_ERROR',
-      });
-      const metrics = (await recovery.runOnce()).metrics!;
-      expect(metrics).toMatchObject({ stuck: 1, inflightTotal: 1, maxRecoveryAttempts: 5 });
-      expect(metrics.inflight.CONFIRMED).toBe(1);
-
-      // Nunca se abandona tras el punto de no retorno: reserva confirmada, stock descontado una vez.
-      expect(await reservationStatus(reservationId)).toBe('CONFIRMED');
-      expect(await stock()).toBe(4);
-      expect(await prisma.order.count()).toBe(0);
-
-      // Un reenvío del cliente durante el backoff no fuerza la recuperación.
-      const attemptsBeforeReplay = (
-        await prisma.checkoutAttempt.findUniqueOrThrow({ where: { id: attemptId } })
-      ).recoveryAttempts;
-      const csrf = await who.csrf();
-      const replayDuringBackoff = await placeOrder(who, csrf, key, fingerprint);
-      expect(replayDuringBackoff.status).toBe(503);
-      expect(parse<ApiErrorResponse>(replayDuringBackoff).code).toBe('CHECKOUT_PENDING');
-      expect(
-        (await prisma.checkoutAttempt.findUniqueOrThrow({ where: { id: attemptId } }))
-          .recoveryAttempts,
-      ).toBe(attemptsBeforeReplay);
 
       // Se corrige la causa: la siguiente recuperación completa hacia adelante una sola vez.
       await prisma.$executeRaw`DROP TRIGGER m04_1_block_orders ON "commerce"."orders"`;

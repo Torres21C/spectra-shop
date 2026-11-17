@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { OrderStatus } from '@spectra/contracts';
-import type { PrismaService } from '../database/prisma.service.js';
+import type { PrismaClient } from '../generated/commerce-client/index.js';
 
 export interface FixtureLine {
   readonly productId: string;
@@ -27,7 +27,7 @@ const DEFAULT_LINE: FixtureLine = {
  * grandes (paginación) o contenidos hostiles (XSS) sin consumir stock real. Solo para pruebas.
  */
 export async function seedOrder(
-  prisma: PrismaService,
+  prisma: PrismaClient,
   userId: string,
   options: {
     createdAt?: Date;
@@ -56,6 +56,9 @@ export async function seedOrder(
         expectedUnitPrice: unitPrice,
       })),
       orderId,
+      // DT-08: pedido histórico ya reconocido por Catalog. Su reserva no existe en Catalog, así que
+      // el reconciliador de reconocimiento no debe tomarlo.
+      inventoryFulfilledAt: createdAt,
       expiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000),
       createdAt,
     },
@@ -104,7 +107,7 @@ const COLUMN_BY_STATUS = {
  * estado en una sola sentencia). La validez de la transición la garantizan las restricciones de BD.
  */
 export async function simulateAdminTransition(
-  prisma: PrismaService,
+  prisma: PrismaClient,
   orderId: string,
   status: Exclude<OrderStatus, 'PAGADO'>,
   at: Date,

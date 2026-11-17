@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
+  IsOptional,
   IsUUID,
   Matches,
   Max,
@@ -39,4 +40,27 @@ export class CreateReservationDto {
 export class ReservationIdDto {
   @IsUUID('4')
   reservationId!: string;
+}
+
+/** DT-08: cuerpo de `fulfill`. La pareja reservationId + orderId es la clave natural de idempotencia. */
+export class FulfillReservationDto {
+  @IsUUID('4')
+  orderId!: string;
+}
+
+/** DT-08: parámetros acotados del reporte de reservas confirmadas sin reconocimiento. */
+export class UnfulfilledQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(604_800)
+  olderThanSeconds?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
 }

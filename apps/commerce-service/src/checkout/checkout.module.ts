@@ -9,12 +9,16 @@ import { OutboxService } from '../common/outbox.service.js';
 import { CheckoutRecoveryService } from './checkout-recovery.service.js';
 import { CheckoutController } from './checkout.controller.js';
 import { CheckoutService } from './checkout.service.js';
+import { InventoryFulfillmentRecoveryService } from './inventory-fulfillment-recovery.service.js';
+import { InventoryFulfillmentService } from './inventory-fulfillment.service.js';
 
 @Module({
   controllers: [CheckoutController],
   providers: [
     CheckoutService,
     CheckoutRecoveryService,
+    InventoryFulfillmentService,
+    InventoryFulfillmentRecoveryService,
     CatalogClientService,
     InventoryClientService,
     OutboxService,
@@ -23,6 +27,11 @@ import { CheckoutService } from './checkout.service.js';
     CartAccessGuard,
     CsrfService,
   ],
-  exports: [CheckoutService, CheckoutRecoveryService],
+  exports: [
+    CheckoutService,
+    CheckoutRecoveryService,
+    InventoryFulfillmentService,
+    InventoryFulfillmentRecoveryService,
+  ],
 })
 export class CheckoutModule {}

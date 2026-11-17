@@ -11,7 +11,9 @@ export type FaultMode =
   /** Ejecuta una acción (p. ej. vencer la reserva) y luego reenvía. */
   | { readonly kind: 'before'; readonly action: () => Promise<void> }
   /** Retiene la petición hasta que la prueba la libere. */
-  | { readonly kind: 'hold'; readonly gate: Promise<void> };
+  | { readonly kind: 'hold'; readonly gate: Promise<void> }
+  /** DT-08: responde sin llegar a Catalog con un estado y un cuerpo arbitrarios (respuesta inválida). */
+  | { readonly kind: 'respond'; readonly status: number; readonly body: string };
 
 type Rule = { readonly pattern: RegExp; mode: FaultMode; hits: number };
 
@@ -79,6 +81,13 @@ export class FaultProxy {
       body: Buffer.from(JSON.stringify({ code: 'INJECTED_FAULT' })),
     };
     if (mode.kind === 'fail-before') return unavailable;
+    if (mode.kind === 'respond') {
+      return {
+        status: mode.status,
+        headers: { 'content-type': 'application/json' },
+        body: Buffer.from(mode.body),
+      };
+    }
     if (mode.kind === 'before') await mode.action();
     if (mode.kind === 'hold') await mode.gate;
     const forwarded = await this.forward(incoming, body);

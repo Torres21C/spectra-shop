@@ -67,7 +67,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
   () => {
     let app: INestApplication;
     let server: Server;
-    let prisma: InstanceType<typeof import('../database/prisma.service.js').PrismaService>;
+    // DT-09: cliente de fixtures separado (rol migrador); la aplicación usa el rol de ejecución.
+    let prisma: import('../generated/commerce-client/index.js').PrismaClient;
     let config: typeof import('../config/commerce.config.js').commerceConfig;
     let recovery: InstanceType<
       typeof import('./checkout-recovery.service.js').CheckoutRecoveryService
@@ -84,9 +85,9 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
     let admin: IdentityAgent;
 
     async function boot(): Promise<void> {
-      const [{ AppModule }, prismaModule, recoveryModule] = await Promise.all([
+      const [{ AppModule }, fixtureModule, recoveryModule] = await Promise.all([
         import('../app.module.js'),
-        import('../database/prisma.service.js'),
+        import('../test-support/fixture-client.js'),
         import('./checkout-recovery.service.js'),
       ]);
       const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -102,7 +103,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       );
       await app.init();
       server = app.getHttpServer() as Server;
-      prisma = app.get(prismaModule.PrismaService);
+      prisma = fixtureModule.createFixtureClient();
       recovery = app.get(recoveryModule.CheckoutRecoveryService);
     }
 
@@ -258,6 +259,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
           );
         }
       }
+      await prisma?.$disconnect();
       await Promise.all([catalogDb?.end(), identityDb?.end()]);
     });
 
@@ -291,7 +293,9 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       const attempt = await attemptFor(ana.userId);
       expect(attempt).toMatchObject({ state: 'COMPLETED', orderId: confirmation.id });
       expect(attempt.shipping).toBeNull();
-      expect(await reservation(attempt.reservationId)).toBe('CONFIRMED');
+      // DT-08: tras C3, Commerce reconoce la reserva con su pedido (CONFIRMED → FULFILLED).
+      expect(await reservation(attempt.reservationId)).toBe('FULFILLED');
+      expect(attempt.inventoryFulfilledAt).toBeInstanceOf(Date);
       expect(
         await prisma.cart.findFirstOrThrow({ where: { userId: ana.userId, status: 'CONVERTIDO' } }),
       ).toBeTruthy();
@@ -539,14 +543,29 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       for (const buyer of buyers) await addToCart(buyer, MIC, 1);
       const summaries = await Promise.all(buyers.map((buyer) => summary(buyer)));
       const timings: number[] = [];
-      const responses = await Promise.all(
-        buyers.map(async (buyer, index) => {
-          const started = performance.now();
-          const response = await place(buyer, summaries[index]!.fingerprint);
-          timings.push(performance.now() - started);
-          return response;
-        }),
-      );
+      // La prueba verifica la ausencia de sobreventa bajo concurrencia (con p95 < 10 s), no el
+      // presupuesto de 1,5 s por llamada interna, que cubren las pruebas de inyección de fallos. Con
+      // 20 reservas compitiendo por la misma fila, un runner cargado puede superar 1,5 s y el checkout
+      // queda pendiente (503, sin sobreventa); por eso se usa el máximo permitido (5 s) solo aquí.
+      const internalTimeoutMs = config.timeoutMs;
+      config.timeoutMs = 5_000;
+      let responses: Response[];
+      try {
+        responses = await Promise.all(
+          buyers.map(async (buyer, index) => {
+            const started = performance.now();
+            const response = await place(buyer, summaries[index]!.fingerprint);
+            timings.push(performance.now() - started);
+            return response;
+          }),
+        );
+      } finally {
+        config.timeoutMs = internalTimeoutMs;
+      }
+      const outcome = responses
+        .map((response) => `${response.status}:${parse<{ code?: string }>(response).code ?? '-'}`)
+        .sort();
+      process.stdout.write(`[EV-M04] 20 checkouts concurrentes: ${JSON.stringify(outcome)}\n`);
       const created = responses.filter((response) => response.status === 201);
       const conflicts = responses.filter((response) => response.status === 409);
       expect(created).toHaveLength(5);
@@ -774,7 +793,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       expect(final.state).toBe('COMPLETED');
       expect(final.reservationId).not.toBe(first.reservationId);
       expect(await reservation(first.reservationId)).toBe('RELEASED');
-      expect(await reservation(final.reservationId)).toBe('CONFIRMED');
+      expect(await reservation(final.reservationId)).toBe('FULFILLED');
       expect(await stock(STAND)).toBe(2);
       expect(await prisma.order.count()).toBe(1);
     });

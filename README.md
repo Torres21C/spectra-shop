@@ -41,6 +41,10 @@ openssl pkey -in /ruta/privada/spectra-dev-keys/private.pem -pubout \
 openssl rand -hex 32
 openssl rand -hex 32
 
+# DT-09: seis contraseñas distintas, de migración y de ejecución por servicio
+# (SPECTRA_<SERVICIO>_MIGRATOR_PASSWORD y SPECTRA_<SERVICIO>_APP_PASSWORD en .env).
+for i in 1 2 3 4 5 6; do openssl rand -hex 32; done
+
 npm run build
 docker compose up --build
 ```
@@ -59,7 +63,7 @@ Una vez que los contenedores estén saludables:
 - «Mis pedidos» (P07): <http://127.0.0.1:5173/#/pedidos>;
 - Swagger de Commerce: <http://127.0.0.1:3003/docs>.
 
-Las migraciones y seeds se ejecutan de forma idempotente al iniciar los servicios. PostgreSQL no publica su puerto al host. Las claves ES256 y la credencial interna se suministran desde rutas o variables locales no versionadas. Los listeners internos de Catalog (`3102`) e Identity (`3101`) sólo existen en la red privada de Compose y no se publican al host.
+Cada servicio se conecta a PostgreSQL con su propio rol de ejecución, con permisos mínimos sobre su esquema. Antes de que arranquen los servicios, `postgres-provision` crea los roles, los jobs `*-migrate` aplican migraciones y seeds con el rol migrador propietario de cada esquema y `postgres-finalize` cierra la ventana de migración (DT-09, [runbook](docs/runbooks/dt09-roles-postgresql.md)). `POSTGRES_USER` es solo el administrador del clúster. PostgreSQL no publica su puerto al host. Las claves ES256 y la credencial interna se suministran desde rutas o variables locales no versionadas. Los listeners internos de Catalog (`3102`) e Identity (`3101`) sólo existen en la red privada de Compose y no se publican al host.
 
 ## Comandos
 
@@ -72,6 +76,7 @@ npm run build
 docker compose --profile test run --rm catalog-test
 docker compose --profile test run --rm identity-test
 docker compose --profile test run --rm commerce-test
+docker compose --profile test run --rm db-isolation-test   # DT-09: matriz de privilegios PostgreSQL
 ```
 
 Las tres últimas órdenes ejecutan las pruebas de integración contra PostgreSQL dentro de la red privada de Compose. `identity-test` levanta un servidor HTTPS local con un certificado efímero y comprueba cookies `Secure` reales. `commerce-test` usa comunicación HTTP real entre Commerce, Catalog e Identity; las claves y los tokens internos siguen siendo obligatorios. Las pruebas M04 interponen un proxy HTTP de fallos entre Commerce y Catalog para reproducir caídas, respuestas perdidas, vencimientos y reinicios sin alterar el código productivo.

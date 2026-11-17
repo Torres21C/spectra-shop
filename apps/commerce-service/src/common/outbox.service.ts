@@ -9,7 +9,10 @@ export type AuditEventType =
   | 'ACCESS_DENIED'
   /** M04.1: alerta técnica de operación (saga atascada) y su resolución. */
   | 'CHECKOUT_SAGA_STUCK'
-  | 'CHECKOUT_SAGA_RECOVERED';
+  | 'CHECKOUT_SAGA_RECOVERED'
+  /** DT-08: alerta técnica de reconocimiento de entrega atascado y su resolución. */
+  | 'INVENTORY_FULFILLMENT_STUCK'
+  | 'INVENTORY_FULFILLMENT_RECOVERED';
 
 export interface AuditActor {
   readonly userId: string;

@@ -20,19 +20,19 @@ model Category {
 }
 
 model Product {
-  id          String   @id @default(uuid()) @db.Uuid
-  categoryId  String   @map("category_id") @db.Uuid
-  sku         String   @unique @db.VarChar(64)
-  name        String   @db.VarChar(150)
-  description String   @db.VarChar(2000)
-  searchText  String   @map("search_text") @db.VarChar(2200)
-  price       Decimal  @db.Decimal(10, 2)
-  stock       Int
-  imageKey    String   @map("image_key") @db.VarChar(64)
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
-  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  id               String                 @id @default(uuid()) @db.Uuid
+  categoryId       String                 @map("category_id") @db.Uuid
+  sku              String                 @unique @db.VarChar(64)
+  name             String                 @db.VarChar(150)
+  description      String                 @db.VarChar(2000)
+  searchText       String                 @map("search_text") @db.VarChar(2200)
+  price            Decimal                @db.Decimal(10, 2)
+  stock            Int
+  imageKey         String                 @map("image_key") @db.VarChar(64)
+  isActive         Boolean                @default(true) @map("is_active")
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  category         Category               @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   reservationLines StockReservationLine[]
 
   @@index([categoryId])
@@ -41,10 +41,14 @@ model Product {
   @@map("products")
 }
 
+/// DT-08 (M06.0): FULFILLED = Commerce reconoció la reserva con su pedido (reconocimiento técnico,
+/// no entrega física); RESTOCKED = reposición por cancelación (M06). Estados internos de Catalog.
 enum ReservationStatus {
   PENDING
   CONFIRMED
   RELEASED
+  FULFILLED
+  RESTOCKED
 }
 
 /// Reserva de inventario solicitada por Commerce (saga M04). El stock se descuenta al reservar.
@@ -58,9 +62,14 @@ model StockReservation {
   confirmedAt   DateTime?              @map("confirmed_at") @db.Timestamptz(3)
   releasedAt    DateTime?              @map("released_at") @db.Timestamptz(3)
   releaseReason String?                @map("release_reason") @db.VarChar(32)
+  /// DT-08: pedido de Commerce vinculado de forma única al reconocer la entrega.
+  orderId       String?                @unique @map("order_id") @db.Uuid
+  fulfilledAt   DateTime?              @map("fulfilled_at") @db.Timestamptz(3)
+  restockedAt   DateTime?              @map("restocked_at") @db.Timestamptz(3)
   lines         StockReservationLine[]
 
   @@index([status, expiresAt])
+  @@index([status, confirmedAt])
   @@map("stock_reservations")
 }
 
