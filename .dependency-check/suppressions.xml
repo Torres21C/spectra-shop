@@ -4,4 +4,23 @@
     Las excepciones requieren CVE, justificación, responsable y vencimiento máximo de 30 días.
     No agregar supresiones generales por nombre de paquete o severidad.
   -->
+  <suppress until="2026-12-17Z">
+    <notes><![CDATA[
+      Excepción temporal, válida solo para el MVP académico local. No acepta el riesgo para producción ni despliegue en AWS.
+      Hallazgo: GHSA-fc5q-39xc-vjpf / CVE-2026-112366 (ReDoS con extglobs repetidos de una sola rama, CWE-1333, CVSS 3.1 7.5).
+      Paquete exacto: pkg:npm/picomatch@4.0.7 (rango afectado <= 4.0.7; sin versión corregida publicada al 2026-11-17).
+      Ruta: vitest@5.1.0, vite@8.3.8 (apps/web), tinyglobby@0.2.17 y fdir@6.5.0 (dependencias de desarrollo).
+      Responsable: propietario del proyecto (Torres21C). Autorizada el 2026-11-17.
+      Justificación: el ReDoS exige que un atacante controle el patrón de glob. En vite todos los patrones vienen de la
+      configuración o del build (server.fs.deny, assetsInclude, filtros de ids, watcher); la ruta HTTP es la entrada
+      comparada, nunca el patrón. Ninguna dependencia de producción de los backends importa picomatch.
+      Riesgo residual: la dependencia vulnerable sigue presente en todas las imágenes (los Dockerfiles copian el
+      node_modules completo) y se carga en el proceso de la Web (vite preview).
+      Retirada: en cuanto exista una versión corregida compatible, actualizar las dependencias y eliminar esta excepción.
+      Si vence antes, se vuelve a evaluar (no se prorroga automáticamente).
+    ]]></notes>
+    <packageUrl regex="true">^pkg:npm/picomatch@4\.0\.7$</packageUrl>
+    <vulnerabilityName>GHSA-fc5q-39xc-vjpf</vulnerabilityName>
+    <cve>CVE-2026-112366</cve>
+  </suppress>
 </suppressions>
