@@ -645,6 +645,8 @@ button:disabled {
     700 clamp(2.5rem, 5vw, 4.8rem)/0.98 Georgia,
     serif;
   letter-spacing: -0.04em;
+  /* M06 mínimo: los nombres creados por el administrador pueden ser largos y sin espacios. */
+  overflow-wrap: anywhere;
 }
 .detail-description {
   color: #5d6879;
@@ -966,4 +968,26 @@ footer {
     transition: none !important;
     animation-duration: 0.01ms !important;
   }
+}
+
+/* M06/M07 mínimo: tablas de administración y auditoría. */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.92rem;
+}
+
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid rgb(0 0 0 / 10%);
+  padding: 0.55rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.pagination {
+  display: flex;
+  gap: 1rem;
 }

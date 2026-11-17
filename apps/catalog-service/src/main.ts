@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { InternalAppModule } from './internal-app.module.js';
@@ -13,6 +14,8 @@ const app = await NestFactory.create<NestExpressApplication>(AppModule);
 app.getHttpAdapter().getInstance().disable('x-powered-by');
 app.useBodyParser('json', { limit: '16kb' });
 app.useBodyParser('urlencoded', { limit: '16kb', extended: false, parameterLimit: 50 });
+// M06 mínimo: las rutas /admin leen la cookie de sesión y la de CSRF emitidas por Identity.
+app.use(cookieParser());
 app.use(
   helmet({
     contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
@@ -30,10 +33,11 @@ app.enableCors({
     if (!origin || allowedOrigins.has(origin)) callback(null, true);
     else callback(null, false);
   },
-  methods: ['GET', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'X-Request-Id'],
+  // M06 mínimo: POST /admin/products con cookies de sesión y token CSRF (solo orígenes permitidos).
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-Request-Id', 'X-CSRF-Token'],
   exposedHeaders: ['X-Request-Id'],
-  credentials: false,
+  credentials: true,
   maxAge: 600,
 });
 
@@ -48,7 +52,7 @@ app.useGlobalPipes(
 
 const openApiConfig = new DocumentBuilder()
   .setTitle('SPECTRA Shop — Catálogo')
-  .setDescription('API pública de solo lectura para M01 Catálogo')
+  .setDescription('API pública de M01 Catálogo y alta administrativa de productos (M06 mínimo)')
   .setVersion('1.0.0')
   .build();
 SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig), {

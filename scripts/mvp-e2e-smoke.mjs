@@ -14,6 +14,11 @@
  *   SPECTRA_E2E_COMMERCE_URL=http://127.0.0.1:13003 \
  *   node scripts/mvp-e2e-smoke.mjs
  *
+ * M06/M07 mínimo (opcional): con SPECTRA_E2E_AUDIT_URL, SPECTRA_E2E_ADMIN_EMAIL y
+ * SPECTRA_E2E_ADMIN_PASSWORD, además comprueba con sesiones reales que solo ADMIN crea productos
+ * (401/403/CSRF), que el producto aparece en el catálogo, el listado de pedidos y que el evento
+ * PRODUCT_CREATED llega a audit-service. Sin esas variables la sección se informa como OMITIDA.
+ *
  * Imprime un informe JSON (sin cookies ni tokens) y termina con código 1 ante el primer fallo.
  */
 import { randomUUID } from 'node:crypto';
@@ -22,6 +27,10 @@ const IDENTITY = process.env.SPECTRA_E2E_IDENTITY_URL;
 const CATALOG = process.env.SPECTRA_E2E_CATALOG_URL;
 const COMMERCE = process.env.SPECTRA_E2E_COMMERCE_URL;
 const ORIGIN = process.env.SPECTRA_E2E_ORIGIN ?? 'http://127.0.0.1:5173';
+const AUDIT = process.env.SPECTRA_E2E_AUDIT_URL;
+const ADMIN_EMAIL = process.env.SPECTRA_E2E_ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.SPECTRA_E2E_ADMIN_PASSWORD;
+const ADMIN_ENABLED = Boolean(AUDIT && ADMIN_EMAIL && ADMIN_PASSWORD);
 
 if (!IDENTITY || !CATALOG || !COMMERCE) {
   console.error(
@@ -334,6 +343,35 @@ let order;
   });
 }
 
+// 10b. M06 mínimo: un CLIENTE no puede crear productos (403) aunque tenga sesión y CSRF válidos.
+if (ADMIN_ENABLED) {
+  const token = await csrf();
+  const denied = await call(CATALOG, '/admin/products', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': token },
+    body: {
+      sku: 'SP-E2E-DENY',
+      name: 'Denegado',
+      categoryId: products[0].category.id,
+      price: '1.00',
+      stock: 1,
+    },
+  });
+  const orders = await call(COMMERCE, '/admin/orders');
+  const audit = await call(AUDIT, '/admin/audit-events');
+  expect(
+    denied.status === 403 && orders.status === 403 && audit.status === 403,
+    '10b. CLIENTE en rutas /admin',
+    denied.status,
+    { orders: orders.status, audit: audit.status },
+  );
+  pass('10b. CLIENTE rechazado en /admin (403)', {
+    catalog: denied.status,
+    commerce: orders.status,
+    audit: audit.status,
+  });
+}
+
 // 11. Logout
 {
   const token = await csrf();
@@ -345,6 +383,128 @@ let order;
   const me = await call(IDENTITY, '/auth/me');
   expect(status < 300 && me.status === 401, '11. Logout', status, me.payload);
   pass('11. Logout', { status, meAfter: me.status });
+}
+
+// 12. M06/M07 mínimo con sesión ADMIN real
+if (ADMIN_ENABLED) {
+  const anonymous = await call(CATALOG, '/admin/products', {
+    method: 'POST',
+    body: {
+      sku: 'SP-E2E-ANON',
+      name: 'Anónimo',
+      categoryId: products[0].category.id,
+      price: '1.00',
+      stock: 1,
+    },
+  });
+  expect(
+    anonymous.status === 401 || anonymous.status === 403,
+    '12. Alta anónima',
+    anonymous.status,
+    anonymous.payload,
+  );
+
+  const loginToken = await csrf();
+  const login = await call(IDENTITY, '/auth/login', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': loginToken },
+    body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, returnTo: '#/pedidos' },
+  });
+  expect(
+    login.status < 300 && login.payload?.user?.role === 'ADMIN',
+    '12. Login ADMIN',
+    login.status,
+    login.payload?.code,
+  );
+
+  const sku = `SP-E2E-${String(stamp).slice(-8)}`;
+  const body = {
+    sku,
+    name: 'Producto E2E <b>M06</b>',
+    categoryId: products[0].category.id,
+    price: '249.50',
+    stock: 6,
+  };
+  const noCsrf = await call(CATALOG, '/admin/products', { method: 'POST', body });
+  expect(noCsrf.status === 403, '12. Alta sin CSRF', noCsrf.status, noCsrf.payload);
+
+  const token = await csrf();
+  const created = await call(CATALOG, '/admin/products', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': token },
+    body,
+  });
+  expect(
+    created.status === 201 && created.payload?.sku === sku,
+    '12. Alta de producto',
+    created.status,
+    created.payload,
+  );
+  const visible = await call(CATALOG, `/products/${created.payload.id}`);
+  expect(
+    visible.status === 200 && visible.payload?.name === body.name,
+    '12. Producto en catálogo',
+    visible.status,
+    visible.payload,
+  );
+  const duplicate = await call(CATALOG, '/admin/products', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': await csrf() },
+    body,
+  });
+  expect(duplicate.status === 409, '12. SKU duplicado', duplicate.status, duplicate.payload);
+
+  const adminOrders = await call(COMMERCE, '/admin/orders');
+  expect(
+    adminOrders.status === 200 && adminOrders.payload?.items?.some((item) => item.id === order.id),
+    '12. Pedidos (ADMIN)',
+    adminOrders.status,
+    adminOrders.payload?.meta,
+  );
+
+  // El relay entrega la outbox de Catalog cada pocos segundos: se espera hasta 30 s.
+  let auditEvent;
+  for (let attempt = 0; attempt < 30 && !auditEvent; attempt += 1) {
+    const latest = await call(AUDIT, '/admin/audit-events');
+    expect(latest.status === 200, '12. Consulta de auditoría', latest.status, latest.payload);
+    auditEvent = latest.payload.items.find(
+      (item) => item.eventType === 'PRODUCT_CREATED' && item.resourceId === created.payload.id,
+    );
+    if (!auditEvent) await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  expect(
+    auditEvent?.actorRole === 'ADMIN' && auditEvent?.metadata?.sku === sku,
+    '12. PRODUCT_CREATED en audit-service',
+    0,
+    auditEvent,
+  );
+  expect(
+    !/cookie|token|password|authorization/i.test(JSON.stringify(auditEvent)),
+    '12. Evento sin secretos',
+    0,
+    auditEvent,
+  );
+  const logoutToken = await csrf();
+  await call(IDENTITY, '/auth/logout', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': logoutToken },
+    body: {},
+  });
+  pass('12. ADMIN: alta, catálogo, pedidos y auditoría', {
+    anonymous: anonymous.status,
+    withoutCsrf: noCsrf.status,
+    created: created.status,
+    duplicate: duplicate.status,
+    productId: created.payload.id,
+    auditEventId: auditEvent.id,
+    auditActorRole: auditEvent.actorRole,
+  });
+} else {
+  report.steps.push({
+    step: '12. ADMIN (M06/M07)',
+    result: 'OMITIDA',
+    reason: 'faltan variables de ADMIN/audit',
+  });
 }
 
 report.verdict = 'PASS';

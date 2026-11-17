@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/audit-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("AUDIT_DATABASE_URL")
+}
+
+/// M07 mínimo: registro de auditoría de solo anexar. El rol de ejecución solo tiene INSERT y SELECT
+/// (DT-09); la aplicación no expone ninguna operación de modificación o borrado (RN-31).
+/// `id` es el identificador del evento en la outbox de origen: la ingesta es idempotente.
+model AuditEvent {
+  id            String   @id @db.Uuid
+  sourceService String   @map("source_service") @db.VarChar(20)
+  eventType     String   @map("event_type") @db.VarChar(50)
+  result        String   @db.VarChar(20)
+  actorId       String?  @map("actor_id") @db.Uuid
+  actorRole     String?  @map("actor_role") @db.VarChar(20)
+  resourceType  String   @map("resource_type") @db.VarChar(40)
+  resourceId    String?  @map("resource_id") @db.Uuid
+  sourceIp      String?  @map("source_ip") @db.VarChar(64)
+  requestId     String?  @map("request_id") @db.Uuid
+  metadata      Json
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(3)
+  receivedAt    DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+
+  @@index([occurredAt])
+  @@map("audit_events")
+}

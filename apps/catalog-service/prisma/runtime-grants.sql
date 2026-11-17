@@ -6,8 +6,12 @@ REVOKE ALL ON ALL TABLES IN SCHEMA "catalog" FROM "spectra_catalog_app";
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA "catalog" FROM "spectra_catalog_app";
 
 GRANT SELECT ON "catalog"."categories" TO "spectra_catalog_app";
-GRANT SELECT ON "catalog"."products" TO "spectra_catalog_app";
+-- M06 mínimo: el administrador crea productos (sin DELETE: RN-23, borrado lógico).
+GRANT SELECT, INSERT ON "catalog"."products" TO "spectra_catalog_app";
 -- La reserva y su compensación solo modifican el stock y la marca de actualización.
 GRANT UPDATE ("stock", "updated_at") ON "catalog"."products" TO "spectra_catalog_app";
 GRANT SELECT, INSERT, UPDATE ON "catalog"."stock_reservations" TO "spectra_catalog_app";
 GRANT SELECT, INSERT ON "catalog"."stock_reservation_lines" TO "spectra_catalog_app";
+-- M06/M07 mínimo: outbox de Catalog. El relay solo marca la entrega (published_at); nunca borra.
+GRANT SELECT, INSERT ON "catalog"."outbox_events" TO "spectra_catalog_app";
+GRANT UPDATE ("published_at") ON "catalog"."outbox_events" TO "spectra_catalog_app";

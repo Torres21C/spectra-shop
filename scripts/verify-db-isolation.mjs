@@ -1,6 +1,6 @@
 // DT-09 (M06.0): verificación automatizada del aislamiento PostgreSQL por servicio.
 //
-// Se ejecuta con los seis roles de servicio (nunca con el administrador) y comprueba:
+// Se ejecuta con los ocho roles de servicio (nunca con el administrador) y comprueba:
 //   1. Atributos de rol y ausencia de pertenencias entre roles.
 //   2. Privilegios de PUBLIC sobre la base y los esquemas.
 //   3. La matriz exacta de privilegios de tabla y columna de cada rol en cada esquema.
@@ -8,7 +8,8 @@
 //      esquemas ajenos, TEMP, `public`, SET ROLE), siempre dentro de transacciones revertidas.
 //
 // Variables: IDENTITY_APP_URL, IDENTITY_MIGRATOR_URL, CATALOG_APP_URL, CATALOG_MIGRATOR_URL,
-// COMMERCE_APP_URL, COMMERCE_MIGRATOR_URL. Nunca imprime URLs ni credenciales.
+// COMMERCE_APP_URL, COMMERCE_MIGRATOR_URL, AUDIT_APP_URL, AUDIT_MIGRATOR_URL. Nunca imprime URLs ni
+// credenciales.
 // Salida: una línea JSON por comprobación y un resumen final; código 1 si alguna falla.
 import pg from 'pg';
 
@@ -41,14 +42,18 @@ const SERVICES = {
     migratorUrl: 'CATALOG_MIGRATOR_URL',
     grants: {
       categories: ['SELECT'],
-      products: ['SELECT'],
+      // M06 mínimo: alta administrativa de productos (sin DELETE, RN-23).
+      products: ['SELECT', 'INSERT'],
       stock_reservations: ['SELECT', 'INSERT', 'UPDATE'],
       stock_reservation_lines: ['SELECT', 'INSERT'],
+      // M07 mínimo: outbox de Catalog; el relay solo marca published_at.
+      outbox_events: ['SELECT', 'INSERT'],
       _prisma_migrations: [],
     },
-    // Actualización por columnas: solo stock y marca temporal.
+    // Actualización por columnas: solo stock y marca temporal; en la outbox, solo la marca de entrega.
     columnUpdates: {
       products: { allowed: ['stock', 'updated_at'], denied: ['price', 'is_active', 'name'] },
+      outbox_events: { allowed: ['published_at'], denied: ['metadata', 'event_type', 'actor_id'] },
     },
     sequences: {},
     deniedWrite: 'UPDATE "catalog"."products" SET "price" = "price" WHERE false',
@@ -70,6 +75,22 @@ const SERVICES = {
     columnUpdates: {},
     sequences: { order_number_seq: { USAGE: true, SELECT: false, UPDATE: false } },
     deniedWrite: 'UPDATE "commerce"."orders" SET "status" = "status" WHERE false',
+  },
+  // M07 mínimo: audit-service. Solo anexar (RN-31): INSERT y SELECT, nunca UPDATE ni DELETE.
+  audit: {
+    runtime: 'spectra_audit_app',
+    migrator: 'spectra_audit_migrator',
+    appUrl: 'AUDIT_APP_URL',
+    migratorUrl: 'AUDIT_MIGRATOR_URL',
+    grants: {
+      audit_events: ['SELECT', 'INSERT'],
+      _prisma_migrations: [],
+    },
+    columnUpdates: {
+      audit_events: { allowed: [], denied: ['metadata', 'event_type', 'result', 'actor_id'] },
+    },
+    sequences: {},
+    deniedWrite: 'DELETE FROM "audit"."audit_events" WHERE false',
   },
 };
 const ALL_ROLES = Object.values(SERVICES).flatMap((s) => [s.runtime, s.migrator]);
@@ -117,7 +138,7 @@ async function verifyGlobal(client, database) {
        FROM pg_roles WHERE rolname = ANY($1) ORDER BY rolname`,
     [ALL_ROLES],
   );
-  record('existen los seis roles de servicio', roles.length === ALL_ROLES.length, {
+  record(`existen los ${ALL_ROLES.length} roles de servicio`, roles.length === ALL_ROLES.length, {
     found: roles.length,
   });
   for (const role of roles) {

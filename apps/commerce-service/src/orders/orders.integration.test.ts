@@ -482,6 +482,33 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       expect(row.total.toFixed(2)).toBe('150.00');
     });
 
+    it('M06 mínimo: ADMIN lists every customer order read-only; CLIENTE gets 403 and anonymous 401', async () => {
+      const base = new Date('2026-11-10T10:00:00.000Z');
+      const older = await seedOrder(prisma, ana.userId, { createdAt: minutesAfter(base, 0) });
+      const newer = await seedOrder(prisma, bruno.userId, { createdAt: minutesAfter(base, 1) });
+
+      const listed = await get(admin, '/admin/orders');
+      expect(listed.status).toBe(200);
+      const page = parse<OrderHistoryPage>(listed);
+      expect(page.meta).toEqual({ page: 1, pageSize: 10, totalItems: 2, totalPages: 1 });
+      expect(page.items.map((order) => order.id)).toEqual([newer.id, older.id]);
+      expect(Object.keys(page.items[0]!)).not.toContain('shipping');
+
+      expect((await get(ana, '/admin/orders')).status).toBe(403);
+      await get(undefined, '/admin/orders').expect(401);
+      // Lista blanca de la consulta: el administrador solo elige la página.
+      expect((await get(admin, '/admin/orders?userId=x')).status).toBe(400);
+      // Solo lectura: no existen rutas de escritura administrativas sobre pedidos.
+      for (const method of ['post', 'patch', 'delete'] as const) {
+        const response = await supertest(server)
+          [method]('/admin/orders')
+          .set('Cookie', admin.cookieHeader())
+          .set('Origin', ORIGIN);
+        expect(response.status).toBe(404);
+      }
+      expect(await prisma.order.count()).toBe(2);
+    });
+
     it('RS02/sessions: anonymous, forged, revoked, idle, expired and admin sessions are refused', async () => {
       const { id } = await seedOrder(prisma, ana.userId);
       for (const path of ['/orders', `/orders/${id}`]) {

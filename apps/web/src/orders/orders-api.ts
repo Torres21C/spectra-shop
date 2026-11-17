@@ -131,3 +131,12 @@ export async function getOrderDetail(orderId: string, signal?: AbortSignal): Pro
   }
   return decodeOrderDetail(await load(`/orders/${encodeURIComponent(orderId)}`, signal));
 }
+
+/** M06 mínimo: listado de solo lectura de todos los pedidos (el servidor exige ADMIN). */
+export async function getAdminOrders(
+  page: number,
+  signal?: AbortSignal,
+): Promise<OrderHistoryPage> {
+  const safePage = Number.isInteger(page) && page >= 1 && page <= 10_000 ? page : 1;
+  return decodeHistory(await load(`/admin/orders?page=${safePage}`, signal));
+}

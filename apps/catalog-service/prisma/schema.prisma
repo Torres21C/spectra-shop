@@ -86,3 +86,23 @@ model StockReservationLine {
   @@index([productId])
   @@map("stock_reservation_lines")
 }
+
+/// M06/M07 mínimo: outbox transaccional de Catalog. El evento se escribe en la misma transacción que
+/// el cambio administrativo y un relay lo entrega de forma idempotente a audit-service.
+model OutboxEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  eventType    String    @map("event_type") @db.VarChar(50)
+  result       String    @db.VarChar(20)
+  actorId      String?   @map("actor_id") @db.Uuid
+  actorRole    String?   @map("actor_role") @db.VarChar(20)
+  resourceType String    @map("resource_type") @db.VarChar(40)
+  resourceId   String?   @map("resource_id") @db.Uuid
+  sourceIp     String?   @map("source_ip") @db.VarChar(64)
+  requestId    String?   @map("request_id") @db.Uuid
+  metadata     Json
+  occurredAt   DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  publishedAt  DateTime? @map("published_at") @db.Timestamptz(3)
+
+  @@index([publishedAt, occurredAt])
+  @@map("outbox_events")
+}
