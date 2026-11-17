@@ -4,7 +4,7 @@ Aplicación académica de comercio electrónico cloud-native. El código vive en
 
 ## Estado
 
-M01 Catálogo, M02 Identidad, M03 Carrito, M04 Checkout y su endurecimiento M04.1 están integrados en `main`. M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). El Incremento 5 se desarrolla en `feature/m05-orders`: M05 añade el historial, el detalle y la línea de tiempo de los pedidos propios del cliente ([ADR-M05-01](docs/adr/ADR-M05-01-gestion-pedidos.md)). No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
+M01 Catálogo, M02 Identidad, M03 Carrito, M04 Checkout y su endurecimiento M04.1 están integrados en `main`. M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). M05 añade el historial, el detalle y la línea de tiempo de los pedidos propios del cliente ([ADR-M05-01](docs/adr/ADR-M05-01-gestion-pedidos.md)) y M06.0 los prerrequisitos DT-08/DT-09; ambos están integrados en `main`. El flujo MVP completo (registro → login → catálogo → carrito → checkout → pedido) funciona desde la Web; véase [Demostración del MVP](#demostración-del-mvp). La administración de pedidos (M06) y la consulta de auditoría (M07) no están implementadas. No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
 
 ## Arquitectura
 
@@ -182,5 +182,27 @@ Sólo el rol `CLIENTE` puede usar estas rutas (`ADMIN` → 403; la consulta admi
 - Las transiciones de estado las registrará el administrador en M06. En M05, CA-M05-04 se verifica con transiciones simuladas en las pruebas (`simulateAdminTransition`); su validación integral queda para M06.
 - `ACCESS_DENIED` permanece en la outbox; la entrega a `audit-service` y la consulta de auditoría corresponden a M07.
 - La respuesta 404 es idéntica en contenido, pero el caso de pedido ajeno hace una consulta y una escritura adicionales; la diferencia de tiempo no se mitiga en M05.
+
+## Demostración del MVP
+
+Con el stack levantado (`docker compose up -d --build --wait`), todo el recorrido se hace desde <http://127.0.0.1:5173>, sin Postman ni SQL:
+
+1. **Registro** (`#/registro`): datos sintéticos, contraseña de 12+ caracteres → «Continuar a iniciar sesión».
+2. **Login** (`#/login`): la cabecera muestra el nombre, «Carrito» y «Mis pedidos».
+3. **Catálogo** (`#/`): búsqueda, filtro por categoría y paginación → **detalle** de un producto.
+4. **Carrito**: «Agregar al carrito» en el detalle; en `#/carrito` cambiar la cantidad o eliminar líneas (total calculado en servidor).
+5. **Checkout** (`#/checkout`): datos de entrega ficticios y pago **simulado** (aprobar o rechazar). Un rechazo conserva el carrito y no reserva stock.
+6. **Confirmación** (`#/checkout/confirmacion/<id>`) → «Ver seguimiento del pedido» → **Mis pedidos** (`#/pedidos`).
+7. **Inventario**: un producto en «Últimas unidades» (p. ej., Soporte Atlas, 3 unidades en el seed) pasa a «Agotado» al comprar todas sus unidades. La API pública solo expone disponibilidad cualitativa, no cantidades.
+8. **Auditoría**: cada paso deja eventos en las outbox de Identity (`AUTH_REGISTER`, `AUTH_LOGIN_SUCCESS`, `AUTH_LOGOUT`) y Commerce (`ORDER_CREATED`, `PAYMENT_SIMULATED_REJECTED`). Su entrega a `audit-service` y su consulta son de M07; hoy solo pueden verse por lectura de la base.
+
+La compra modifica datos (usuario, pedido, stock). Para ensayar sin tocar la base de desarrollo, use un proyecto Compose aparte con su propio volumen y credenciales efímeras, y publique sus puertos en otros números con un archivo de override fuera del repositorio. Contra ese stack, `scripts/mvp-e2e-smoke.mjs` recorre el mismo flujo por HTTP como lo haría el navegador (Origin, cookies, CSRF e `Idempotency-Key`, incluido el reintento con la misma clave). No tiene URLs por defecto, para que nunca escriba en el stack principal por accidente:
+
+```bash
+SPECTRA_E2E_IDENTITY_URL=http://127.0.0.1:13001 \
+SPECTRA_E2E_CATALOG_URL=http://127.0.0.1:13002 \
+SPECTRA_E2E_COMMERCE_URL=http://127.0.0.1:13003 \
+node scripts/mvp-e2e-smoke.mjs
+```
 
 Consulte [CONTRIBUTING.md](CONTRIBUTING.md) y [SECURITY.md](SECURITY.md) antes de proponer cambios.

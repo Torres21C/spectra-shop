@@ -4,11 +4,13 @@ import { register } from './auth-api.js';
 export function RegisterPage() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setMessage('');
+    setSubmitted(false);
     const form = event.currentTarget;
     const data = new FormData(form);
     try {
@@ -23,6 +25,7 @@ export function RegisterPage() {
         academicDataAccepted: data.get('academicDataAccepted') === 'on',
       });
       setMessage(result);
+      setSubmitted(true);
       form.reset();
     } catch (error: unknown) {
       setMessage(error instanceof Error ? error.message : 'No fue posible completar el registro');
@@ -76,6 +79,12 @@ export function RegisterPage() {
             <p className="form-message" role="status">
               {message}
             </p>
+          )}
+          {/* El mensaje es neutro (no revela si el correo existía); solo se ofrece el siguiente paso. */}
+          {submitted && (
+            <a className="primary-link" href="#/login?returnTo=%23%2F">
+              Continuar a iniciar sesión
+            </a>
           )}
           <button className="primary-button" disabled={busy} type="submit">
             {busy ? 'Procesando…' : 'Registrarme'}
