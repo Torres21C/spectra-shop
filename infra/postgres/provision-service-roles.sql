@@ -3,9 +3,9 @@
 -- Lo ejecuta el administrador del clúster (POSTGRES_USER), nunca un servicio. Es idempotente:
 -- puede repetirse sobre un volumen nuevo o sobre uno existente sin borrar ni recrear datos.
 --
---   * Crea, si no existen, los seis roles LOGIN sin SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS
+--   * Crea, si no existen, los ocho roles LOGIN sin SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS
 --     y rota sus contraseñas desde variables de entorno (nunca desde argumentos ni desde el repositorio).
---   * Retira CONNECT/TEMP de PUBLIC sobre la base y concede CONNECT solo a los seis roles.
+--   * Retira CONNECT/TEMP de PUBLIC sobre la base y concede CONNECT solo a los ocho roles.
 --   * Crea los esquemas si faltan y transfiere al migrador de cada servicio la propiedad del esquema
 --     y de todos sus objetos (tablas, secuencias, tipos y funciones), incluida `_prisma_migrations`.
 --   * Abre la ventana de migración: CREATE sobre la base solo para los migradores, hasta que
@@ -18,6 +18,7 @@
 --   SPECTRA_IDENTITY_MIGRATOR_PASSWORD  SPECTRA_IDENTITY_APP_PASSWORD
 --   SPECTRA_CATALOG_MIGRATOR_PASSWORD   SPECTRA_CATALOG_APP_PASSWORD
 --   SPECTRA_COMMERCE_MIGRATOR_PASSWORD  SPECTRA_COMMERCE_APP_PASSWORD
+--   SPECTRA_AUDIT_MIGRATOR_PASSWORD     SPECTRA_AUDIT_APP_PASSWORD   (M07 mínimo: audit-service)
 
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -34,11 +35,14 @@ SET client_min_messages = 'warning';
 \getenv catalog_app_password SPECTRA_CATALOG_APP_PASSWORD
 \getenv commerce_migrator_password SPECTRA_COMMERCE_MIGRATOR_PASSWORD
 \getenv commerce_app_password SPECTRA_COMMERCE_APP_PASSWORD
+\getenv audit_migrator_password SPECTRA_AUDIT_MIGRATOR_PASSWORD
+\getenv audit_app_password SPECTRA_AUDIT_APP_PASSWORD
 
 SELECT (
   :{?identity_migrator_password} AND :{?identity_app_password}
   AND :{?catalog_migrator_password} AND :{?catalog_app_password}
   AND :{?commerce_migrator_password} AND :{?commerce_app_password}
+  AND :{?audit_migrator_password} AND :{?audit_app_password}
 ) AS all_defined \gset
 \if :all_defined
 \else
@@ -51,7 +55,8 @@ SELECT bool_and(v ~ '^[0-9a-f]{32,128}$') AS passwords_ok
   FROM unnest(ARRAY[
     :'identity_migrator_password', :'identity_app_password',
     :'catalog_migrator_password', :'catalog_app_password',
-    :'commerce_migrator_password', :'commerce_app_password'
+    :'commerce_migrator_password', :'commerce_app_password',
+    :'audit_migrator_password', :'audit_app_password'
   ]) AS v \gset
 \if :passwords_ok
 \else
@@ -62,8 +67,9 @@ SELECT bool_and(v ~ '^[0-9a-f]{32,128}$') AS passwords_ok
 SELECT (SELECT count(DISTINCT v) FROM unnest(ARRAY[
     :'identity_migrator_password', :'identity_app_password',
     :'catalog_migrator_password', :'catalog_app_password',
-    :'commerce_migrator_password', :'commerce_app_password'
-  ]) AS v) = 6 AS passwords_distinct \gset
+    :'commerce_migrator_password', :'commerce_app_password',
+    :'audit_migrator_password', :'audit_app_password'
+  ]) AS v) = 8 AS passwords_distinct \gset
 \if :passwords_distinct
 \else
   \echo 'DT-09: cada rol necesita una contraseña distinta'
@@ -80,7 +86,8 @@ SELECT format('CREATE ROLE %I', r)
   FROM unnest(ARRAY[
     'spectra_identity_migrator', 'spectra_identity_app',
     'spectra_catalog_migrator', 'spectra_catalog_app',
-    'spectra_commerce_migrator', 'spectra_commerce_app'
+    'spectra_commerce_migrator', 'spectra_commerce_app',
+    'spectra_audit_migrator', 'spectra_audit_app'
   ]) AS r
  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
 
@@ -90,6 +97,8 @@ ALTER ROLE spectra_catalog_migrator  WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATER
 ALTER ROLE spectra_catalog_app       WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1 PASSWORD :'catalog_app_password';
 ALTER ROLE spectra_commerce_migrator WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1 PASSWORD :'commerce_migrator_password';
 ALTER ROLE spectra_commerce_app      WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1 PASSWORD :'commerce_app_password';
+ALTER ROLE spectra_audit_migrator    WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1 PASSWORD :'audit_migrator_password';
+ALTER ROLE spectra_audit_app         WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1 PASSWORD :'audit_app_password';
 
 \unset identity_migrator_password
 \unset identity_app_password
@@ -97,14 +106,16 @@ ALTER ROLE spectra_commerce_app      WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATER
 \unset catalog_app_password
 \unset commerce_migrator_password
 \unset commerce_app_password
+\unset audit_migrator_password
+\unset audit_app_password
 
 -- Ningún rol de servicio puede ser miembro de otro (impide SET ROLE hacia un migrador o entre servicios).
 SELECT format('REVOKE %I FROM %I CASCADE', r.rolname, m.rolname)
   FROM pg_auth_members am
   JOIN pg_roles r ON r.oid = am.roleid
   JOIN pg_roles m ON m.oid = am.member
- WHERE r.rolname ~ '^spectra_(identity|catalog|commerce)_(migrator|app)$'
-    OR (m.rolname ~ '^spectra_(identity|catalog|commerce)_(migrator|app)$' AND NOT r.rolname ~ '^pg_') \gexec
+ WHERE r.rolname ~ '^spectra_(identity|catalog|commerce|audit)_(migrator|app)$'
+    OR (m.rolname ~ '^spectra_(identity|catalog|commerce|audit)_(migrator|app)$' AND NOT r.rolname ~ '^pg_') \gexec
 
 -- 2. Base de datos ----------------------------------------------------------------------------
 SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database()) \gexec
@@ -112,13 +123,15 @@ SELECT format('REVOKE ALL ON DATABASE %I FROM %I', current_database(), r)
   FROM unnest(ARRAY[
     'spectra_identity_migrator', 'spectra_identity_app',
     'spectra_catalog_migrator', 'spectra_catalog_app',
-    'spectra_commerce_migrator', 'spectra_commerce_app'
+    'spectra_commerce_migrator', 'spectra_commerce_app',
+    'spectra_audit_migrator', 'spectra_audit_app'
   ]) AS r \gexec
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), r)
   FROM unnest(ARRAY[
     'spectra_identity_migrator', 'spectra_identity_app',
     'spectra_catalog_migrator', 'spectra_catalog_app',
-    'spectra_commerce_migrator', 'spectra_commerce_app'
+    'spectra_commerce_migrator', 'spectra_commerce_app',
+    'spectra_audit_migrator', 'spectra_audit_app'
   ]) AS r \gexec
 
 -- Ningún rol de servicio crea objetos en `public`.
@@ -129,7 +142,8 @@ CREATE TEMP TABLE dt09_service (schema_name text PRIMARY KEY, migrator text NOT 
 INSERT INTO dt09_service VALUES
   ('identity', 'spectra_identity_migrator', 'spectra_identity_app'),
   ('catalog',  'spectra_catalog_migrator',  'spectra_catalog_app'),
-  ('commerce', 'spectra_commerce_migrator', 'spectra_commerce_app');
+  ('commerce', 'spectra_commerce_migrator', 'spectra_commerce_app'),
+  ('audit',    'spectra_audit_migrator',    'spectra_audit_app');
 
 SELECT format('CREATE SCHEMA IF NOT EXISTS %I AUTHORIZATION %I', schema_name, migrator) FROM dt09_service \gexec
 SELECT format('ALTER SCHEMA %I OWNER TO %I', schema_name, migrator) FROM dt09_service \gexec

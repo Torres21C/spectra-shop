@@ -20,7 +20,15 @@ export class OrdersService {
 
   /** RF-026 / CA-M05-01: el filtro de propiedad forma parte de la consulta (RN-20, RS02). */
   async history(userId: string, page: number): Promise<OrderHistoryPage> {
-    const where = { userId };
+    return this.page({ userId }, page);
+  }
+
+  /** M06 mínimo: listado administrativo de todos los pedidos (solo lectura; el guard exige ADMIN). */
+  async allOrders(page: number): Promise<OrderHistoryPage> {
+    return this.page({}, page);
+  }
+
+  private async page(where: { userId?: string }, page: number): Promise<OrderHistoryPage> {
     const [totalItems, orders] = await this.prisma.$transaction([
       this.prisma.order.count({ where }),
       this.prisma.order.findMany({

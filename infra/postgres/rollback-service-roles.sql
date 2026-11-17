@@ -1,8 +1,8 @@
 -- DT-09 (M06.0): reversión del aprovisionamiento de roles por servicio.
 --
--- Devuelve la propiedad de los esquemas `identity`, `catalog` y `commerce` y de todos sus objetos al
+-- Devuelve la propiedad de los esquemas `identity`, `catalog`, `commerce` y `audit` y de todos sus objetos al
 -- rol indicado en SPECTRA_ROLLBACK_OWNER (el propietario anterior; en desarrollo, POSTGRES_USER),
--- retira todos los privilegios concedidos a los seis roles de servicio, los elimina y restablece
+-- retira todos los privilegios concedidos a los ocho roles de servicio, los elimina y restablece
 -- CONNECT/TEMP de PUBLIC sobre la base. No modifica datos.
 --
 -- Requisitos: ejecutar como administrador del clúster, con los servicios detenidos y después de volver
@@ -34,7 +34,8 @@ CREATE TEMP TABLE dt09_roles ON COMMIT DROP AS
 SELECT rolname FROM pg_roles
  WHERE rolname IN ('spectra_identity_migrator', 'spectra_identity_app',
                    'spectra_catalog_migrator', 'spectra_catalog_app',
-                   'spectra_commerce_migrator', 'spectra_commerce_app');
+                   'spectra_commerce_migrator', 'spectra_commerce_app',
+                   'spectra_audit_migrator', 'spectra_audit_app');
 
 -- Propiedad de vuelta al propietario anterior (esquemas, tablas, secuencias, tipos y funciones).
 SELECT format('REASSIGN OWNED BY %I TO %I', rolname, :'rollback_owner')
@@ -52,6 +53,7 @@ SELECT format('DROP ROLE %I', rolname)
   FROM pg_roles
  WHERE rolname IN ('spectra_identity_migrator', 'spectra_identity_app',
                    'spectra_catalog_migrator', 'spectra_catalog_app',
-                   'spectra_commerce_migrator', 'spectra_commerce_app') \gexec
+                   'spectra_commerce_migrator', 'spectra_commerce_app',
+                   'spectra_audit_migrator', 'spectra_audit_app') \gexec
 
 \echo 'DT-09 rollback: propiedad devuelta y roles de servicio eliminados'

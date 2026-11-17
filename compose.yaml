@@ -32,6 +32,8 @@ services:
       SPECTRA_CATALOG_APP_PASSWORD: ${SPECTRA_CATALOG_APP_PASSWORD:?Define SPECTRA_CATALOG_APP_PASSWORD in .env}
       SPECTRA_COMMERCE_MIGRATOR_PASSWORD: ${SPECTRA_COMMERCE_MIGRATOR_PASSWORD:?Define SPECTRA_COMMERCE_MIGRATOR_PASSWORD in .env}
       SPECTRA_COMMERCE_APP_PASSWORD: ${SPECTRA_COMMERCE_APP_PASSWORD:?Define SPECTRA_COMMERCE_APP_PASSWORD in .env}
+      SPECTRA_AUDIT_MIGRATOR_PASSWORD: ${SPECTRA_AUDIT_MIGRATOR_PASSWORD:?Define SPECTRA_AUDIT_MIGRATOR_PASSWORD in .env}
+      SPECTRA_AUDIT_APP_PASSWORD: ${SPECTRA_AUDIT_APP_PASSWORD:?Define SPECTRA_AUDIT_APP_PASSWORD in .env}
     command:
       ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', '/provision/provision-service-roles.sql']
     volumes:
@@ -48,6 +50,9 @@ services:
       dockerfile: apps/identity-service/Dockerfile
     environment:
       IDENTITY_DATABASE_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
+      # M06 mínimo: ADMIN sintético opcional (el seed solo inserta; nunca hay registro público de ADMIN).
+      SYNTHETIC_ADMIN_EMAIL: ${SYNTHETIC_ADMIN_EMAIL:-}
+      SYNTHETIC_ADMIN_PASSWORD: ${SYNTHETIC_ADMIN_PASSWORD:-}
     command:
       [
         'sh',
@@ -142,10 +147,18 @@ services:
       SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
       CATALOG_INVENTORY_TOKENS: ${CATALOG_INVENTORY_TOKENS:?Define CATALOG_INVENTORY_TOKENS in .env}
       CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+      # M06/M07 mínimo: alta de productos para ADMIN y relay de la outbox hacia audit-service.
+      IDENTITY_INTERNAL_URL: http://identity-service:3101
+      IDENTITY_PUBLIC_KEY_PATH: /run/spectra-keys/public.pem
+      SPECTRA_INTERNAL_TOKEN: ${SPECTRA_INTERNAL_TOKEN:?Define SPECTRA_INTERNAL_TOKEN in .env}
+      AUDIT_INTERNAL_URL: http://audit-service:3104
+      COOKIE_SECURE: 'false'
     depends_on:
       postgres-finalize:
         condition: service_completed_successfully
     ports: ['127.0.0.1:3002:3002']
+    volumes:
+      - ${SPECTRA_KEYS_DIR:?Define SPECTRA_KEYS_DIR in .env}/public.pem:/run/spectra-keys/public.pem:ro
     healthcheck:
       test:
         [
@@ -170,6 +183,8 @@ services:
       CATALOG_FIXTURE_DATABASE_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
       SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
       CATALOG_INVENTORY_TOKENS: ${CATALOG_INVENTORY_TOKENS:?Define CATALOG_INVENTORY_TOKENS in .env}
+      # M07 mínimo: las pruebas invocan el relay explícitamente (sin temporizador).
+      AUDIT_RELAY_INTERVAL_MS: '0'
     depends_on:
       postgres-finalize:
         condition: service_completed_successfully
@@ -219,6 +234,25 @@ services:
     restart: 'no'
     networks: [backend]
 
+  # M07 mínimo: esquema `audit` con su rol migrador; el runtime solo recibe INSERT y SELECT.
+  audit-migrate:
+    build:
+      context: .
+      dockerfile: apps/audit-service/Dockerfile
+    environment:
+      AUDIT_DATABASE_URL: postgresql://spectra_audit_migrator:${SPECTRA_AUDIT_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
+    command:
+      [
+        'sh',
+        '-c',
+        './node_modules/.bin/prisma migrate deploy --schema prisma/schema.prisma && ./node_modules/.bin/prisma db execute --schema prisma/schema.prisma --file prisma/runtime-grants.sql',
+      ]
+    depends_on:
+      postgres-provision:
+        condition: service_completed_successfully
+    restart: 'no'
+    networks: [backend]
+
   # DT-09: cierra la ventana de migración (revoca CREATE sobre la base a los migradores) antes de
   # arrancar cualquier servicio.
   postgres-finalize:
@@ -238,6 +272,8 @@ services:
       catalog-migrate:
         condition: service_completed_successfully
       commerce-migrate:
+        condition: service_completed_successfully
+      audit-migrate:
         condition: service_completed_successfully
     restart: 'no'
     networks: [backend]
@@ -326,6 +362,8 @@ services:
       CATALOG_MIGRATOR_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
       COMMERCE_APP_URL: postgresql://spectra_commerce_app:${SPECTRA_COMMERCE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
       COMMERCE_MIGRATOR_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
+      AUDIT_APP_URL: postgresql://spectra_audit_app:${SPECTRA_AUDIT_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
+      AUDIT_MIGRATOR_URL: postgresql://spectra_audit_migrator:${SPECTRA_AUDIT_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
     volumes:
       - ./scripts/verify-db-isolation.mjs:/workspace/scripts/verify-db-isolation.mjs:ro
     depends_on:
@@ -340,6 +378,20 @@ services:
       dockerfile: apps/audit-service/Dockerfile
     environment:
       PORT: '3004'
+      # M07 mínimo: la ingesta interna (3104) solo existe en la red privada; no se publica al host.
+      INTERNAL_PORT: '3104'
+      AUDIT_DATABASE_URL: postgresql://spectra_audit_app:${SPECTRA_AUDIT_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
+      IDENTITY_INTERNAL_URL: http://identity-service:3101
+      IDENTITY_PUBLIC_KEY_PATH: /run/spectra-keys/public.pem
+      SPECTRA_INTERNAL_TOKEN: ${SPECTRA_INTERNAL_TOKEN:?Define SPECTRA_INTERNAL_TOKEN in .env}
+      SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
+      COOKIE_SECURE: 'false'
+      CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+    depends_on:
+      postgres-finalize:
+        condition: service_completed_successfully
+    volumes:
+      - ${SPECTRA_KEYS_DIR:?Define SPECTRA_KEYS_DIR in .env}/public.pem:/run/spectra-keys/public.pem:ro
     ports: ['127.0.0.1:3004:3004']
     healthcheck:
       test:
@@ -353,6 +405,23 @@ services:
       timeout: 3s
       retries: 10
     networks: [edge, backend]
+
+  # M07 mínimo: pruebas de integración de audit-service contra PostgreSQL con el rol de ejecución.
+  audit-test:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: apps/audit-service/Dockerfile
+      target: build
+    environment:
+      AUDIT_DATABASE_URL: postgresql://spectra_audit_app:${SPECTRA_AUDIT_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
+      AUDIT_FIXTURE_DATABASE_URL: postgresql://spectra_audit_migrator:${SPECTRA_AUDIT_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
+      SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS:?Define SPECTRA_INTERNAL_TOKENS in .env}
+    depends_on:
+      postgres-finalize:
+        condition: service_completed_successfully
+    command: ['npm', 'test', '--workspace', '@spectra/audit-service']
+    networks: [backend]
 
 networks:
   edge:

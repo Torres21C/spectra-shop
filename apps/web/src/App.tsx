@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AdminAuditPage, AdminOrdersPage, AdminProductPage } from './admin/AdminPages.js';
 import { CatalogPage } from './catalog/CatalogPage.js';
 import { ProductDetailPage } from './catalog/ProductDetailPage.js';
 import { AuthProvider, useAuth } from './auth/AuthContext.js';
@@ -49,6 +50,10 @@ function Application() {
   else if (path === '/pedidos') page = <OrdersPage page={historyPage(query)} />;
   else if (orderMatch?.[1]) page = <OrderDetailPage orderId={orderMatch[1]} />;
   else if (path === '/carrito') page = <CartPage />;
+  // M06/M07 mínimo: pantallas de administración (el servidor exige ADMIN en cada petición).
+  else if (path === '/admin/productos/nuevo') page = <AdminProductPage />;
+  else if (path === '/admin/pedidos') page = <AdminOrdersPage page={historyPage(query)} />;
+  else if (path === '/admin/auditoria') page = <AdminAuditPage />;
 
   return (
     <div className="app-shell">
@@ -69,7 +74,17 @@ function Application() {
           {user ? (
             <>
               {user.role === 'CLIENTE' && <a href="#/pedidos">Mis pedidos</a>}
-              <a href="#/pedidos" aria-label={`Mi cuenta, ${user.fullName}`}>
+              {user.role === 'ADMIN' && (
+                <>
+                  <a href="#/admin/productos/nuevo">Nuevo producto</a>
+                  <a href="#/admin/pedidos">Pedidos</a>
+                  <a href="#/admin/auditoria">Auditoría</a>
+                </>
+              )}
+              <a
+                href={user.role === 'ADMIN' ? '#/admin/pedidos' : '#/pedidos'}
+                aria-label={`Mi cuenta, ${user.fullName}`}
+              >
                 {user.fullName}
               </a>
               <button type="button" onClick={() => void logout()}>

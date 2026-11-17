@@ -19,7 +19,11 @@ export function LoginPage({ returnTo = '#/pedidos' }: { returnTo?: string }) {
         returnTo: safeClientReturn(returnTo),
       });
       setUser(result.user);
-      window.location.hash = safeClientReturn(result.returnTo).slice(1);
+      const target = safeClientReturn(result.returnTo);
+      // M06 mínimo: el destino por defecto del cliente (#/pedidos) no aplica al ADMIN.
+      window.location.hash = (
+        result.user.role === 'ADMIN' && target === '#/pedidos' ? '#/admin/pedidos' : target
+      ).slice(1);
     } catch (error: unknown) {
       setMessage(error instanceof Error ? error.message : 'No fue posible iniciar sesión');
     } finally {

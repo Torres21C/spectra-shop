@@ -72,8 +72,8 @@ jobs:
           echo "SPECTRA_INTERNAL_TOKENS=$internal_token" >> "$GITHUB_ENV"
           echo "CATALOG_INVENTORY_TOKEN=$inventory_token" >> "$GITHUB_ENV"
           echo "CATALOG_INVENTORY_TOKENS=$inventory_token" >> "$GITHUB_ENV"
-          # DT-09: un rol de migración y otro de ejecución por servicio, con contraseñas efímeras.
-          for role in IDENTITY_MIGRATOR IDENTITY_APP CATALOG_MIGRATOR CATALOG_APP COMMERCE_MIGRATOR COMMERCE_APP; do
+          # DT-09: un rol de migración y otro de ejecución por servicio (incluido audit), con contraseñas efímeras.
+          for role in IDENTITY_MIGRATOR IDENTITY_APP CATALOG_MIGRATOR CATALOG_APP COMMERCE_MIGRATOR COMMERCE_APP AUDIT_MIGRATOR AUDIT_APP; do
             value="$(openssl rand -hex 32)"
             echo "::add-mask::$value"
             echo "SPECTRA_${role}_PASSWORD=$value" >> "$GITHUB_ENV"
@@ -87,16 +87,19 @@ jobs:
           npm run db:deploy --workspace @spectra/identity-service
           npm run db:seed:dev --workspace @spectra/identity-service
           npm run prisma:generate --workspace @spectra/commerce-service
+          npm run prisma:generate --workspace @spectra/audit-service
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - name: Integración M03–M05 distribuida, aislamiento DT-09 y cobertura
+      - name: Integración M03–M07 distribuida, aislamiento DT-09 y cobertura
         run: |
           docker compose --profile test up -d --build --wait identity-service catalog-service
           docker compose --profile test run --rm db-isolation-test
           docker compose --profile test run --rm identity-test
           docker compose --profile test run --rm catalog-test
+          docker compose --profile test build audit-test
+          docker compose --profile test run --rm audit-test
           docker compose --profile test build commerce-test
           docker compose --profile test run --rm commerce-test \
             npm run test:cov --workspace @spectra/commerce-service

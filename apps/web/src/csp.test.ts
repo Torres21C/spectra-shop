@@ -22,7 +22,7 @@ function connectSrc(): string[] {
 }
 
 describe('Content-Security-Policy of the web app', () => {
-  it('allows every API origin the client calls by default (Identity, Catalog and Commerce)', () => {
+  it('allows every API origin the client calls by default (Identity, Catalog, Commerce and Audit)', () => {
     const defaults = Object.values(sources).flatMap((source) =>
       [...source.matchAll(/VITE_[A-Z_]+_API_URL \?\? '(http[^']+)'/g)].map((match) => match[1]!),
     );
@@ -31,6 +31,7 @@ describe('Content-Security-Policy of the web app', () => {
       'http://127.0.0.1:3001',
       'http://127.0.0.1:3002',
       'http://127.0.0.1:3003',
+      'http://127.0.0.1:3004',
     ]);
     const allowed = connectSrc();
     for (const origin of origins) expect(allowed, origin).toContain(origin);

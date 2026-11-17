@@ -4,7 +4,7 @@ Aplicación académica de comercio electrónico cloud-native. El código vive en
 
 ## Estado
 
-M01 Catálogo, M02 Identidad, M03 Carrito, M04 Checkout y su endurecimiento M04.1 están integrados en `main`. M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). M05 añade el historial, el detalle y la línea de tiempo de los pedidos propios del cliente ([ADR-M05-01](docs/adr/ADR-M05-01-gestion-pedidos.md)) y M06.0 los prerrequisitos DT-08/DT-09; ambos están integrados en `main`. El flujo MVP completo (registro → login → catálogo → carrito → checkout → pedido) funciona desde la Web; véase [Demostración del MVP](#demostración-del-mvp). La administración de pedidos (M06) y la consulta de auditoría (M07) no están implementadas. No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
+M01 Catálogo, M02 Identidad, M03 Carrito, M04 Checkout y su endurecimiento M04.1 están integrados en `main`. M04 incorpora el checkout con pago **simulado**, pedidos con precios congelados y una saga orquestada por Commerce con reservas de inventario en Catalog ([ADR-M04-01](docs/adr/ADR-M04-01-checkout-saga.md)). M05 añade el historial, el detalle y la línea de tiempo de los pedidos propios del cliente ([ADR-M05-01](docs/adr/ADR-M05-01-gestion-pedidos.md)) y M06.0 los prerrequisitos DT-08/DT-09; ambos están integrados en `main`. El flujo MVP completo (registro → login → catálogo → carrito → checkout → pedido) funciona desde la Web; véase [Demostración del MVP](#demostración-del-mvp). M06 y M07 están implementados en su **versión mínima** (alta de productos y listado de pedidos para ADMIN; auditoría de `PRODUCT_CREATED` con consulta de solo lectura); véase [M06/M07 mínimos](#m06m07-mínimos-administración-y-auditoría). No existe despliegue en AWS ni integración con pagos reales; no se solicitan ni almacenan datos de tarjeta.
 
 ## Arquitectura
 
@@ -74,6 +74,7 @@ npm test
 npm run test:cov
 npm run build
 docker compose --profile test run --rm catalog-test
+docker compose --profile test run --rm audit-test
 docker compose --profile test run --rm identity-test
 docker compose --profile test run --rm commerce-test
 docker compose --profile test run --rm db-isolation-test   # DT-09: matriz de privilegios PostgreSQL
@@ -204,5 +205,22 @@ SPECTRA_E2E_CATALOG_URL=http://127.0.0.1:13002 \
 SPECTRA_E2E_COMMERCE_URL=http://127.0.0.1:13003 \
 node scripts/mvp-e2e-smoke.mjs
 ```
+
+## M06/M07 mínimos: administración y auditoría
+
+Alcance reducido y aprobado para cerrar el MVP académico:
+
+- **M06:** el ADMIN crea productos (`POST http://127.0.0.1:3002/admin/products`, pantalla `#/admin/productos/nuevo`) y consulta todos los pedidos en solo lectura (`GET http://127.0.0.1:3003/admin/orders`, `#/admin/pedidos`). No hay edición, desactivación, ajustes de inventario, transiciones de estado, cancelación ni panel resumen.
+- **M07:** el alta escribe `PRODUCT_CREATED` en `catalog.outbox_events` **en la misma transacción** que el producto. Un relay de Catalog lo entrega cada 5 s a audit-service (`POST /internal/audit/events`, listener interno `3104` no publicado, token interno), que deduplica por id del evento (`audit.audit_events`, solo `INSERT`/`SELECT` para el rol de ejecución). El ADMIN consulta los últimos 50 eventos (`GET http://127.0.0.1:3004/admin/audit-events`, `#/admin/auditoria`). No existen rutas de modificación ni borrado de auditoría.
+- **Seguridad:** JWT ES256 y sesión activa validada en Identity, RBAC ADMIN en cada servicio, CSRF de doble envío con `Origin` en lista blanca para la escritura, DTO con lista blanca y SKU único (409). La ingesta solo acepta orígenes y tipos de evento de una lista cerrada, con metadatos planos y sin claves de secretos.
+
+**Habilitarlo en un entorno existente** exige, con autorización y respaldo previo:
+
+1. Añadir a `.env` `SPECTRA_AUDIT_MIGRATOR_PASSWORD` y `SPECTRA_AUDIT_APP_PASSWORD` (`openssl rand -hex 32`, distintas) y, para la demo, `SYNTHETIC_ADMIN_EMAIL` y `SYNTHETIC_ADMIN_PASSWORD` (16+ caracteres). El seed solo inserta el ADMIN si no existe; nunca hay registro público de ADMIN.
+2. `docker compose up -d --build --wait`: `postgres-provision` crea los roles de audit, los jobs `*-migrate` aplican las migraciones aditivas (`catalog.outbox_events`, `audit.audit_events`) y `postgres-finalize` cierra la ventana.
+
+**Demostración:** iniciar sesión con el ADMIN sintético → «Nuevo producto» → «Ver en el catálogo» → «Auditoría» (pulsar «Actualizar» si el evento aún no llegó; el relay tarda unos segundos). `scripts/mvp-e2e-smoke.mjs` lo verifica por HTTP con sesiones reales si además se definen `SPECTRA_E2E_AUDIT_URL`, `SPECTRA_E2E_ADMIN_EMAIL` y `SPECTRA_E2E_ADMIN_PASSWORD`.
+
+**Límites:** solo Catalog entrega su outbox (las de Identity y Commerce siguen pendientes de entrega), sin filtros de auditoría ni `AUDIT_VIEWED`, sin registro de `ACCESS_DENIED` en las rutas `/admin`, y la ingesta reutiliza el token interno compartido. `identity-test` borra los usuarios de su base (incluido el ADMIN sintético): ejecútelo solo en bases desechables y vuelva a sembrar con `docker compose run --rm --no-deps identity-migrate node dist/database/seed.js`.
 
 Consulte [CONTRIBUTING.md](CONTRIBUTING.md) y [SECURITY.md](SECURITY.md) antes de proponer cambios.

@@ -1,13 +1,18 @@
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AdminModule } from './admin/admin.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
 import { RequestContextMiddleware } from './common/request-context.js';
 import { SafeExceptionFilter } from './common/safe-exception.filter.js';
 import { HealthController } from './health.controller.js';
 
 @Module({
-  imports: [ThrottlerModule.forRoot([{ name: 'catalog', ttl: 60_000, limit: 120 }]), CatalogModule],
+  imports: [
+    ThrottlerModule.forRoot([{ name: 'catalog', ttl: 60_000, limit: 120 }]),
+    CatalogModule,
+    AdminModule,
+  ],
   controllers: [HealthController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

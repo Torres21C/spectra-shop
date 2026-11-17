@@ -10,7 +10,15 @@ import type { ApiErrorResponse } from '@spectra/contracts';
 import type { Response } from 'express';
 import type { RequestWithId } from './request-context.js';
 
-const SAFE_CODES = new Set(['INVALID_CATEGORY', 'PRODUCT_NOT_AVAILABLE']);
+const SAFE_CODES = new Set([
+  'INVALID_CATEGORY',
+  'PRODUCT_NOT_AVAILABLE',
+  // M06 mínimo: errores de administración sin detalles internos.
+  'SKU_DUPLICATED',
+  'AUTH_REQUIRED',
+  'CSRF_INVALID',
+  'IDENTITY_UNAVAILABLE',
+]);
 
 @Catch()
 export class SafeExceptionFilter implements ExceptionFilter {
