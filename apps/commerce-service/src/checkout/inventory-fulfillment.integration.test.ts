@@ -33,6 +33,7 @@ type FulfillmentRecovery = InstanceType<
 type Fulfillment = InstanceType<
   typeof import('./inventory-fulfillment.service.js').InventoryFulfillmentService
 >;
+type FulfillmentRunReport = Awaited<ReturnType<FulfillmentRecovery['runOnce']>>;
 
 function parse<T>(response: Response): T {
   return JSON.parse(response.text) as T;
@@ -362,22 +363,90 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
 
     it('DT08-10: two replicas compete through the lease and a stale owner cannot write', async () => {
       proxy.on(FULFILL, { kind: 'fail-before' });
-      const { attemptId, reservationId } = await checkout();
+      const { order, attemptId, reservationId } = await checkout();
       proxy.reset();
       await waitUntilDue(attemptId);
       expect(await fulfillment.fulfill(attemptId, randomUUID(), randomUUID())).toBe('SKIPPED');
       expect((await attempt(attemptId)).inventoryFulfilledAt).toBeNull();
 
       proxy.on(FULFILL, { kind: 'forward' });
-      const replica = await boot();
+      // Al arrancar, la réplica lanza su reconciliación (onApplicationBootstrap → runOnce, sin
+      // await). Para que no compita con las dos ejecuciones del caso sin que se cuente su resultado,
+      // el intento queda fuera de plazo durante el arranque y se espera a que esa ejecución termine.
+      const { InventoryFulfillmentRecoveryService } =
+        await import('./inventory-fulfillment-recovery.service.js');
+      const dueAt = (await attempt(attemptId)).fulfillmentNextAttemptAt;
+      await prisma.checkoutAttempt.update({
+        where: { id: attemptId },
+        data: { fulfillmentNextAttemptAt: new Date(Date.now() + 3_600_000) },
+      });
+      const bootstrapRuns = vi.spyOn(InventoryFulfillmentRecoveryService.prototype, 'runOnce');
+      let replica: Awaited<ReturnType<typeof boot>> | undefined;
       try {
-        const [first, second] = await Promise.all([recovery.runOnce(), replica.recovery.runOnce()]);
-        expect(first.outcomes.FULFILLED + second.outcomes.FULFILLED).toBe(1);
-        expect(proxy.hits(FULFILL)).toBe(1);
+        replica = await boot();
+        const bootstrap = await Promise.all(
+          bootstrapRuns.mock.results.map((result) => result.value as Promise<FulfillmentRunReport>),
+        );
+        bootstrapRuns.mockRestore();
+        // La reconciliación de arranque terminó sin procesar intentos: el caso empieza limpio.
+        expect(bootstrap).toHaveLength(1);
+        expect(bootstrap[0]!.outcomes).toEqual({ FULFILLED: 0, DEFERRED: 0, STUCK: 0, SKIPPED: 0 });
+        await prisma.checkoutAttempt.update({
+          where: { id: attemptId },
+          data: { fulfillmentNextAttemptAt: dueAt },
+        });
+
+        const runs = await Promise.all([recovery.runOnce(), replica.recovery.runOnce()]);
+        const total = (outcome: keyof FulfillmentRunReport['outcomes']): number =>
+          runs[0].outcomes[outcome] + runs[1].outcomes[outcome];
+        // Diagnóstico si falla: informes de ambas réplicas, intento y reservas de Catalog con el mismo
+        // id o el mismo order_id (distingue los dos casos que Commerce agrupa como
+        // ORDER_RESERVATION_MISMATCH). No altera el resultado: solo explica un fallo.
+        const healthy =
+          total('FULFILLED') === 1 && total('STUCK') === 0 && proxy.hits(FULFILL) === 1;
+        const diagnostics = healthy
+          ? ''
+          : JSON.stringify(
+              {
+                runs: runs.map(({ outcomes, newlyStuck, metrics }) => ({
+                  outcomes,
+                  newlyStuck,
+                  metrics,
+                })),
+                catalogFulfillCalls: proxy.hits(FULFILL),
+                attempt: await prisma.checkoutAttempt.findUnique({
+                  where: { id: attemptId },
+                  select: {
+                    orderId: true,
+                    reservationId: true,
+                    inventoryFulfilledAt: true,
+                    fulfillmentAttempts: true,
+                    fulfillmentLastError: true,
+                    fulfillmentStuckSince: true,
+                    fulfillmentNextAttemptAt: true,
+                    fulfillmentLeaseOwner: true,
+                    fulfillmentLeaseUntil: true,
+                  },
+                }),
+                catalogReservations: (
+                  await catalogDb.query(
+                    `SELECT id, status, order_id, confirmed_at, fulfilled_at, released_at
+                       FROM catalog.stock_reservations WHERE id = $1 OR order_id = $2`,
+                    [reservationId, order.id],
+                  )
+                ).rows,
+              },
+              null,
+              2,
+            );
+        expect(total('FULFILLED'), diagnostics).toBe(1);
+        expect(total('STUCK'), diagnostics).toBe(0);
+        expect(proxy.hits(FULFILL), diagnostics).toBe(1);
         expect((await reservation(reservationId))!.status).toBe('FULFILLED');
         expect((await attempt(attemptId)).inventoryFulfilledAt).toBeInstanceOf(Date);
       } finally {
-        await replica.app.close();
+        bootstrapRuns.mockRestore();
+        await replica?.app.close();
       }
     });
 
