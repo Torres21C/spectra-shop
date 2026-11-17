@@ -10,7 +10,6 @@ import supertest from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 const CATEGORY = '10000000-0000-4000-8000-000000000001';
-const ORIGIN = 'http://127.0.0.1:5173';
 const CSRF = 'synthetic-csrf-token-for-admin-tests';
 const ADMIN = { userId: randomUUID(), sessionId: randomUUID(), role: 'ADMIN' as const };
 const XSS = '<img src=x onerror=alert(1)>';
@@ -33,15 +32,26 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let server: Server;
     let fixtures: PrismaClient;
     let relay: import('./audit-relay.service.js').AuditRelayService;
+    // Dependen de COOKIE_SECURE y CORS_ORIGINS (la CI usa cookies __Host- y origen https).
+    let origin: string;
+    let csrfCookie: string;
 
     beforeAll(async () => {
-      const [{ AppModule }, { AdminAccessGuard }, { AuditRelayService }, { createFixtureClient }] =
-        await Promise.all([
-          import('../app.module.js'),
-          import('./admin-access.guard.js'),
-          import('./audit-relay.service.js'),
-          import('../test-support/fixture-client.js'),
-        ]);
+      const [
+        { AppModule },
+        { AdminAccessGuard },
+        { AuditRelayService },
+        { createFixtureClient },
+        { adminConfig },
+      ] = await Promise.all([
+        import('../app.module.js'),
+        import('./admin-access.guard.js'),
+        import('./audit-relay.service.js'),
+        import('../test-support/fixture-client.js'),
+        import('./admin.config.js'),
+      ]);
+      origin = [...adminConfig.allowedOrigins()][0]!;
+      csrfCookie = adminConfig.csrfCookieName();
       // La sesión real (JWT ES256 + Identity) se valida en el stack E2E; aquí se fija un ADMIN.
       const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
         .overrideGuard(AdminAccessGuard)
@@ -86,8 +96,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const create = (body: unknown, headers: Record<string, string> = {}) =>
       supertest(server)
         .post('/admin/products')
-        .set('Origin', ORIGIN)
-        .set('Cookie', `spectra-csrf-dev=${CSRF}`)
+        .set('Origin', origin)
+        .set('Cookie', `${csrfCookie}=${CSRF}`)
         .set('X-CSRF-Token', CSRF)
         .set(headers)
         .send(body as object);

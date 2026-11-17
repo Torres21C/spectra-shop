@@ -1,10 +1,15 @@
 import { ForbiddenException, UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminAccessGuard, assertCsrf, type AdminRequest } from './admin-access.guard.js';
+import { adminConfig } from './admin.config.js';
 import type { IdentityClientService } from './identity-client.service.js';
 import type { JwtVerifierService } from './jwt-verifier.service.js';
 
 const ADMIN = { userId: 'u-1', sessionId: 's-1', role: 'ADMIN' as const };
+// Los nombres de cookie y el origen dependen de COOKIE_SECURE y CORS_ORIGINS (p. ej. la CI usa __Host-).
+const ACCESS = adminConfig.accessCookieName();
+const CSRF_COOKIE = adminConfig.csrfCookieName();
+const ALLOWED_ORIGIN = [...adminConfig.allowedOrigins()][0]!;
 
 function context(request: Partial<AdminRequest>): ExecutionContext {
   return {
@@ -25,7 +30,7 @@ function guard(local: unknown, active: unknown) {
 }
 
 describe('AdminAccessGuard (M06 mínimo)', () => {
-  const request = () => ({ cookies: { 'spectra-access-dev': 'jwt' }, requestId: 'r-1' });
+  const request = () => ({ cookies: { [ACCESS]: 'jwt' }, requestId: 'r-1' });
 
   it('admits an ADMIN whose JWT and active session match', async () => {
     const req: Partial<AdminRequest> = request();
@@ -57,24 +62,21 @@ describe('assertCsrf (M06 mínimo)', () => {
   const base = (headers: Record<string, string>, csrf?: string) =>
     ({
       header: (name: string) => headers[name.toLowerCase()],
-      cookies: csrf ? { 'spectra-csrf-dev': csrf } : {},
+      cookies: csrf ? { [CSRF_COOKIE]: csrf } : {},
     }) as unknown as AdminRequest;
 
   it('accepts a matching token from an allowed Origin', () => {
     expect(() =>
-      assertCsrf(base({ origin: 'http://127.0.0.1:5173', 'x-csrf-token': 'abc' }, 'abc')),
+      assertCsrf(base({ origin: ALLOWED_ORIGIN, 'x-csrf-token': 'abc' }, 'abc')),
     ).not.toThrow();
   });
 
   it.each([
     ['a foreign origin', base({ origin: 'https://evil.example', 'x-csrf-token': 'abc' }, 'abc')],
     ['a missing origin', base({ 'x-csrf-token': 'abc' }, 'abc')],
-    ['a missing header', base({ origin: 'http://127.0.0.1:5173' }, 'abc')],
-    ['a missing cookie', base({ origin: 'http://127.0.0.1:5173', 'x-csrf-token': 'abc' })],
-    [
-      'a mismatching token',
-      base({ origin: 'http://127.0.0.1:5173', 'x-csrf-token': 'abd' }, 'abc'),
-    ],
+    ['a missing header', base({ origin: ALLOWED_ORIGIN }, 'abc')],
+    ['a missing cookie', base({ origin: ALLOWED_ORIGIN, 'x-csrf-token': 'abc' })],
+    ['a mismatching token', base({ origin: ALLOWED_ORIGIN, 'x-csrf-token': 'abd' }, 'abc')],
   ])('rejects %s', (_label, request) => {
     expect(() => assertCsrf(request)).toThrow(ForbiddenException);
   });
