@@ -60,7 +60,7 @@ docker compose --profile test run --rm db-isolation-test   # matriz de privilegi
 4. **Aprovisionar y migrar** con la nueva configuración: `docker compose up -d --build identity-service catalog-service commerce-service web`. `postgres-provision` transfiere la propiedad del contenido actual a los migradores; los jobs `*-migrate` no encuentran migraciones pendientes y solo aplican `runtime-grants.sql` y los seeds; `postgres-finalize` cierra la ventana.
 5. **Verificar.**
    - `docker compose --profile test run --rm db-isolation-test` debe terminar con `failed=0`.
-   - Los conteos y hashes de contenido deben ser idénticos a los del inventario previo. Solo cambian propietarios y ACL. Los seeds de Catalog restablecen los productos de demostración, igual que antes de DT-09.
+   - Los conteos y hashes de contenido deben ser idénticos a los del inventario previo. Solo cambian propietarios, ACL y `_prisma_migrations` si había migraciones pendientes. Los seeds solo insertan filas que falten: no modifican stock, precios ni productos existentes.
    - Revise la salud de los servicios y haga un recorrido de catálogo, login, carrito y pedidos.
 
 ## Rollback

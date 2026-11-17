@@ -1,6 +1,6 @@
 # ADR-M06-0-02 — Confirmación de entrega de reservas (FULFILLED) y detección de reservas sin reconocer (DT-08)
 
-- **Estado:** D-M06-0-07 a D-M06-0-12 implementan el diseño de M06.0 aprobado por el propietario del proyecto (2026-11-16). Las adendas de RN-25 y DT-08/R27 son **propuestas, no aprobadas**; no modifican la ERS ni la matriz de riesgos.
+- **Estado:** D-M06-0-07 a D-M06-0-12 implementan el diseño de M06.0 aprobado por el propietario del proyecto (2026-11-16); D-M06-0-13 (seed idempotente) la autorizó el propietario en el endurecimiento final. Las adendas de RN-25 y DT-08/R27 son **propuestas, no aprobadas**; no modifican la ERS ni la matriz de riesgos.
 - **Deuda:** DT-08 (antes de M06). **Riesgo:** R27 (inconsistencia por fallo parcial de la saga) **permanece abierto**. **Control:** CTL-39 (reconciliación de la saga), todavía parcial.
 - **Relacionado:** [ADR-M04-01](ADR-M04-01-checkout-saga.md), [runbook de sagas atascadas](../runbooks/checkout-sagas-atascadas.md), [ADR-M06-0-01](ADR-M06-0-01-roles-postgresql.md).
 
@@ -42,6 +42,8 @@ En M04/M04.1, después de que Catalog confirma la reserva (punto de no retorno),
    - El cliente de Commerce acepta los nuevos estados.
    - Si la reconciliación de una saga no completada encuentra la reserva ya `FULFILLED` o `RESTOCKED`, la trata como `RESERVATION_MISMATCH`: la difiere y alerta, nunca la aborta ni la libera.
    - Los fixtures de pedidos sintéticos de M05 se crean ya reconocidos.
+
+7. **D-M06-0-13 (autorizada por el propietario, 2026-11-16). Seed de Catalog idempotente.** En la validación sobre una copia restaurada, el seed de M01 (`upsert` con `update` completo) restableció en cada despliegue el stock de productos con reservas ya confirmadas y reconocidas: sumó 5 unidades inexistentes, con riesgo de sobreventa. Ahora `seedCatalog` usa `createMany({ skipDuplicates: true })` (`INSERT … ON CONFLICT DO NOTHING`): inserta solo las categorías y productos que faltan y nunca actualiza filas existentes (stock, precio, nombre, estado ni `updated_at`). Una prueba de regresión ejecuta el seed dos veces después de un pedido confirmado y reconocido y de cambios en un producto, y comprueba filas idénticas.
 
 ## Garantías y límites
 

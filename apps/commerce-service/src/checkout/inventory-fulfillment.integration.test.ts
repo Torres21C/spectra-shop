@@ -169,6 +169,22 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       return (await response.json()) as UnfulfilledReservationsReport;
     }
 
+    /** Provoca un fallo de persistencia al registrar el reconocimiento en Commerce. */
+    async function blockAcknowledgement(): Promise<void> {
+      await prisma.$executeRaw`
+        CREATE OR REPLACE FUNCTION "commerce"."dt08_block_ack"() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic acknowledgement failure'; END $$`;
+      await prisma.$executeRaw`
+        CREATE TRIGGER dt08_block_ack BEFORE UPDATE ON "commerce"."checkout_attempts"
+          FOR EACH ROW WHEN (OLD.inventory_fulfilled_at IS NULL AND NEW.inventory_fulfilled_at IS NOT NULL)
+          EXECUTE FUNCTION "commerce"."dt08_block_ack"()`;
+    }
+
+    async function dropAckBlocker(): Promise<void> {
+      await prisma.$executeRaw`DROP TRIGGER IF EXISTS dt08_block_ack ON "commerce"."checkout_attempts"`;
+      await prisma.$executeRaw`DROP FUNCTION IF EXISTS "commerce"."dt08_block_ack"()`;
+    }
+
     beforeAll(async () => {
       catalogDb = new Pool({ connectionString: process.env.CATALOG_TEST_DATABASE_URL });
       identityDb = new Pool({ connectionString: process.env.IDENTITY_TEST_DATABASE_URL });
@@ -192,6 +208,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
         'fulfillmentBackoffMaxMs',
         'fulfillmentStuckAttempts',
         'fulfillmentStuckAgeMs',
+        'fulfillmentLeaseMs',
         'checkoutAttemptsPerMinute',
       ] as const) {
         defaults[name] = config[name];
@@ -214,6 +231,8 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       config.fulfillmentBackoffMaxMs = 400;
       config.fulfillmentStuckAttempts = 5;
       config.fulfillmentStuckAgeMs = 3_600_000;
+      config.fulfillmentLeaseMs = defaults.fulfillmentLeaseMs!;
+      await dropAckBlocker();
       await prisma.orderItem.deleteMany();
       await prisma.order.deleteMany();
       await prisma.checkoutAttempt.deleteMany();
@@ -230,6 +249,7 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
 
     afterAll(async () => {
       Object.assign(config, defaults);
+      if (prisma) await dropAckBlocker();
       await app?.close();
       await prisma?.$disconnect();
       await proxy?.stop();
@@ -455,6 +475,83 @@ describe.skipIf(!process.env.COMMERCE_DATABASE_URL)(
       expect(
         await prisma.outboxEvent.count({ where: { eventType: 'INVENTORY_FULFILLMENT_STUCK' } }),
       ).toBe(1);
+    });
+
+    it('DT08-INVALID: unexpected Catalog responses are retried as INVALID_RESPONSE and never touch inventory', async () => {
+      proxy.on(FULFILL, {
+        kind: 'respond',
+        status: 200,
+        body: JSON.stringify({ status: 'FULFILLED', orderId: randomUUID() }),
+      });
+      const { order, attemptId, reservationId } = await checkout();
+      expect(await attempt(attemptId)).toMatchObject({
+        inventoryFulfilledAt: null,
+        fulfillmentAttempts: 1,
+        fulfillmentLastError: 'INVALID_RESPONSE',
+        fulfillmentLeaseOwner: null,
+      });
+      // El proxy no reenvió: Catalog no aplicó nada y la reserva sigue confirmada.
+      expect(await reservation(reservationId)).toMatchObject({
+        status: 'CONFIRMED',
+        order_id: null,
+      });
+
+      proxy.reset();
+      proxy.on(FULFILL, {
+        kind: 'respond',
+        status: 400,
+        body: JSON.stringify({ code: 'VALIDATION_ERROR' }),
+      });
+      await waitUntilDue(attemptId);
+      expect((await recovery.runOnce()).outcomes.DEFERRED).toBe(1);
+      expect(await attempt(attemptId)).toMatchObject({
+        fulfillmentAttempts: 2,
+        fulfillmentLastError: 'INVALID_RESPONSE',
+        fulfillmentStuckSince: null,
+      });
+
+      proxy.reset();
+      await waitUntilDue(attemptId);
+      expect((await recovery.runOnce()).outcomes.FULFILLED).toBe(1);
+      expect(await reservation(reservationId)).toMatchObject({
+        status: 'FULFILLED',
+        order_id: order.id,
+      });
+      expect(await attempt(attemptId)).toMatchObject({ fulfillmentLastError: null });
+      expect(await stock()).toBe(8);
+      expect(await prisma.order.count()).toBe(1);
+    });
+
+    it('DT08-PERSIST: Catalog applies fulfill but Commerce fails to record it; the lease expires and the retry converges once', async () => {
+      config.fulfillmentLeaseMs = 300;
+      await blockAcknowledgement();
+      const { order, attemptId, reservationId } = await checkout();
+      // Catalog ya reconoció la reserva; Commerce no pudo registrarlo y conserva el arrendamiento.
+      const applied = await reservation(reservationId);
+      expect(applied).toMatchObject({ status: 'FULFILLED', order_id: order.id });
+      const blocked = await attempt(attemptId);
+      expect(blocked).toMatchObject({
+        state: 'COMPLETED',
+        inventoryFulfilledAt: null,
+        fulfillmentAttempts: 0,
+        fulfillmentLastError: null,
+      });
+      expect(blocked.fulfillmentLeaseOwner).not.toBeNull();
+
+      await dropAckBlocker();
+      // Mientras el arrendamiento siga vigente ningún reconciliador lo toma.
+      if ((blocked.fulfillmentLeaseUntil?.getTime() ?? 0) > Date.now() + 50) {
+        expect((await recovery.runOnce()).outcomes.FULFILLED).toBe(0);
+      }
+      await sleep(Math.max(0, (blocked.fulfillmentLeaseUntil?.getTime() ?? 0) - Date.now()) + 50);
+      expect((await recovery.runOnce()).outcomes.FULFILLED).toBe(1);
+      expect((await attempt(attemptId)).inventoryFulfilledAt).toBeInstanceOf(Date);
+      expect((await reservation(reservationId))!.fulfilled_at!.getTime()).toBe(
+        applied!.fulfilled_at!.getTime(),
+      );
+      expect(await stock()).toBe(8);
+      expect(await prisma.order.count()).toBe(1);
+      expect(await prisma.outboxEvent.count({ where: { eventType: 'ORDER_CREATED' } })).toBe(1);
     });
   },
 );

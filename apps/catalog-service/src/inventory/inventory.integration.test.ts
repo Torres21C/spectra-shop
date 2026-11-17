@@ -178,7 +178,17 @@ describe.skipIf(!process.env.DATABASE_URL || !process.env.CATALOG_INVENTORY_TOKE
     });
 
     it('prevents overselling under concurrency: 20 buyers, 5 units, and 2 buyers for the last unit', async () => {
+      const startedAt = performance.now();
       const results = await Promise.all(Array.from({ length: 20 }, () => reserve([line(HUB, 1)])));
+      // Duración observable en la evidencia; la corrección la deciden las aserciones siguientes.
+      process.stdout.write(
+        `${JSON.stringify({
+          event: 'concurrency_20_reservations',
+          ms: Math.round(performance.now() - startedAt),
+          statuses: results.map((response) => response.status).sort(),
+        })}\n`,
+      );
+      expect(results.every((response) => [201, 409].includes(response.status))).toBe(true);
       expect(results.filter((response) => response.status === 201)).toHaveLength(5);
       expect(results.filter((response) => response.status === 409)).toHaveLength(15);
       expect(await stock(HUB)).toBe(0);
