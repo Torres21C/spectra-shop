@@ -49,6 +49,8 @@ services:
     build:
       context: .
       dockerfile: apps/identity-service/Dockerfile
+      # AWS-08: imagen de migración (Prisma CLI); la de ejecución ya no la contiene.
+      target: migrate
     environment:
       IDENTITY_DATABASE_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity
       # M06 mínimo: ADMIN sintético opcional (el seed solo inserta; nunca hay registro público de ADMIN).
@@ -123,6 +125,8 @@ services:
     build:
       context: .
       dockerfile: apps/catalog-service/Dockerfile
+      # AWS-08: imagen de migración (Prisma CLI); la de ejecución ya no la contiene.
+      target: migrate
     environment:
       DATABASE_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog
     command:
@@ -221,6 +225,8 @@ services:
     build:
       context: .
       dockerfile: apps/commerce-service/Dockerfile
+      # AWS-08: imagen de migración (Prisma CLI); la de ejecución ya no la contiene.
+      target: migrate
     environment:
       COMMERCE_DATABASE_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce
     command:
@@ -240,6 +246,8 @@ services:
     build:
       context: .
       dockerfile: apps/audit-service/Dockerfile
+      # AWS-08: imagen de migración (Prisma CLI); la de ejecución ya no la contiene.
+      target: migrate
     environment:
       AUDIT_DATABASE_URL: postgresql://spectra_audit_migrator:${SPECTRA_AUDIT_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit
     command:
