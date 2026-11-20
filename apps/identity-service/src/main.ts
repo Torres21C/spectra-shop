@@ -5,12 +5,15 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
+import { trustProxySetting } from './common/trust-proxy.js';
 import { identityConfig } from './config/identity.config.js';
 import { InternalAppModule } from './internal-app.module.js';
 
 const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 const internalPort = Number.parseInt(process.env.INTERNAL_PORT ?? '3101', 10);
 const app = await NestFactory.create<NestExpressApplication>(AppModule);
+// AWS-11: IP real del cliente detrás de CloudFront y del ALB (límites por IP, auditoría).
+app.set('trust proxy', trustProxySetting());
 app.getHttpAdapter().getInstance().disable('x-powered-by');
 app.useBodyParser('json', { limit: '16kb' });
 app.useBodyParser('urlencoded', { limit: '16kb', extended: false, parameterLimit: 30 });
