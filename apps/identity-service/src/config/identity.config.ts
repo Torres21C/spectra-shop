@@ -28,6 +28,21 @@ export const identityConfig = {
   ),
 };
 
+/**
+ * AD-08 / AWS-01: origen de la firma de los JWT. `file` (por defecto) usa claves PEM locales o efímeras;
+ * `kms` firma con una clave asimétrica de AWS KMS indicada en IDENTITY_KMS_KEY_ID (ARN, id o alias).
+ */
+export function jwtSignerConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): { readonly mode: 'file' } | { readonly mode: 'kms'; readonly keyId: string } {
+  const mode = env.IDENTITY_JWT_SIGNER ?? 'file';
+  if (mode === 'file') return { mode };
+  if (mode !== 'kms') throw new Error('IDENTITY_JWT_SIGNER debe ser file o kms');
+  const keyId = env.IDENTITY_KMS_KEY_ID?.trim();
+  if (!keyId) throw new Error('IDENTITY_KMS_KEY_ID es obligatorio con IDENTITY_JWT_SIGNER=kms');
+  return { mode, keyId };
+}
+
 export async function readDevelopmentKeys(): Promise<
   { privateKeyPem: string; publicKeyPem: string } | undefined
 > {

@@ -1,4 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import {
+  identityPublicKeySource,
+  readIdentityPublicKeyPem,
+} from '../common/identity-public-key.js';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -50,7 +53,8 @@ export const commerceConfig = {
     }
     return token;
   })(),
-  publicKeyPath: required('IDENTITY_PUBLIC_KEY_PATH'),
+  /** AD-08: se valida al arrancar; PEM en IDENTITY_PUBLIC_KEY_PEM (AWS) o archivo (local). */
+  identityPublicKey: identityPublicKeySource(),
   issuer: process.env.JWT_ISSUER ?? 'spectra-shop-identity',
   audience: process.env.JWT_AUDIENCE ?? 'spectra-shop-services',
   cookieSecure: booleanEnv('COOKIE_SECURE', process.env.NODE_ENV === 'production'),
@@ -99,5 +103,5 @@ export function csrfCookieName(): string {
 }
 
 export function readIdentityPublicKey(): Promise<string> {
-  return readFile(commerceConfig.publicKeyPath, 'utf8');
+  return readIdentityPublicKeyPem();
 }

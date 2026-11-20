@@ -16,6 +16,7 @@
     "test:cov": "vitest run src --coverage"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1163.0",
     "@nestjs/common": "^12.5.0",
     "@nestjs/core": "^12.5.0",
     "@nestjs/platform-express": "^12.5.0",

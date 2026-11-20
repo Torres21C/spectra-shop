@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readIdentityPublicKeyPem } from '../common/identity-public-key.js';
 
 /**
  * M06/M07 mínimo: configuración de la administración de Catalog y del relay de auditoría.
@@ -55,8 +55,8 @@ export const adminConfig = {
     ),
   accessCookieName: (): string => (cookieSecure() ? '__Host-spectra-access' : 'spectra-access-dev'),
   csrfCookieName: (): string => (cookieSecure() ? '__Host-spectra-csrf' : 'spectra-csrf-dev'),
-  readIdentityPublicKey: (): Promise<string> =>
-    readFile(required('IDENTITY_PUBLIC_KEY_PATH'), 'utf8'),
+  /** AD-08: PEM en IDENTITY_PUBLIC_KEY_PEM (AWS) o archivo en IDENTITY_PUBLIC_KEY_PATH (local). */
+  readIdentityPublicKey: (): Promise<string> => readIdentityPublicKeyPem(),
   auditUrl: (): URL => url('AUDIT_INTERNAL_URL', 'http://audit-service:3104'),
   /** 0 desactiva el temporizador (pruebas); el relay sigue disponible con `runOnce`. */
   relayIntervalMs: (): number => integer('AUDIT_RELAY_INTERVAL_MS', 5000, 0, 600_000),
