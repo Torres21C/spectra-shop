@@ -29,7 +29,7 @@ Autenticación: cookies `HttpOnly` con `SameSite=Strict` emitidas por Identity (
 
 ## Estado de preparación AWS
 
-**No listo.** La arquitectura es desplegable como laboratorio en ECS Fargate + RDS, pero hay 4 bloqueantes que requieren PR (claves JWT por archivo, aprovisionamiento DT-09 incompatible con el maestro no superusuario de RDS, jobs de BD con bind mounts e imagen de Docker Hub, y la excepción de picomatch, que excluye AWS de forma expresa) y 5 bloqueantes de configuración. Esfuerzo estimado hasta un laboratorio desplegable: ≈ 12–19 días-persona. Detalle en [03-diagnostico-aws.md](03-diagnostico-aws.md) y [04-plan-despliegue-aws.md](04-plan-despliegue-aws.md).
+**No listo** (actualizado el 2026-11-20: los bloqueantes de código están resueltos en ramas locales PR-1 a PR-4, sin merge ni validación en AWS; ver el [diagnóstico, §6](03-diagnostico-aws.md#6-estado-de-las-correcciones-actualizado-el-2026-11-20)). La arquitectura es desplegable como laboratorio en ECS Fargate + RDS, pero hay 4 bloqueantes que requieren PR (claves JWT por archivo, aprovisionamiento DT-09 incompatible con el maestro no superusuario de RDS, jobs de BD con bind mounts e imagen de Docker Hub, y la excepción de picomatch, que excluye AWS de forma expresa) y 5 bloqueantes de configuración. Esfuerzo estimado hasta un laboratorio desplegable: ≈ 12–19 días-persona. Detalle en [03-diagnostico-aws.md](03-diagnostico-aws.md) y [04-plan-despliegue-aws.md](04-plan-despliegue-aws.md).
 
 ## Validación de estos entregables
 
