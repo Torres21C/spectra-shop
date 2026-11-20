@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readIdentityPublicKeyPem } from './common/identity-public-key.js';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -34,8 +34,8 @@ export const auditConfig = {
   audience: (): string => process.env.JWT_AUDIENCE ?? 'spectra-shop-services',
   timeoutMs: (): number => Number.parseInt(process.env.INTERNAL_HTTP_TIMEOUT_MS ?? '1500', 10),
   accessCookieName: (): string => (cookieSecure() ? '__Host-spectra-access' : 'spectra-access-dev'),
-  readIdentityPublicKey: (): Promise<string> =>
-    readFile(required('IDENTITY_PUBLIC_KEY_PATH'), 'utf8'),
+  /** AD-08: PEM en IDENTITY_PUBLIC_KEY_PEM (AWS) o archivo en IDENTITY_PUBLIC_KEY_PATH (local). */
+  readIdentityPublicKey: (): Promise<string> => readIdentityPublicKeyPem(),
   allowedOrigins: (): ReadonlySet<string> =>
     new Set(
       (process.env.CORS_ORIGINS ?? 'http://127.0.0.1:5173,http://localhost:5173')
