@@ -1,0 +1,30 @@
+# AWS-02: override que emula Amazon RDS en un proyecto Compose DESECHABLE.
+#
+# El aprovisionamiento DT-09 lo ejecuta `rds_master` (no superusuario, con CREATEROLE y CREATEDB y
+# propietario de la base), como el usuario maestro de RDS. Uso, siempre con un nombre de proyecto propio
+# y un volumen nuevo (el script de inicialización solo corre al crear el volumen):
+#
+#   docker compose -p spectra-rds-emu --env-file <env-desechable> \
+#     -f compose.yaml -f infra/postgres/rds-emulation/compose.rds-emulation.yaml \
+#     --profile test run --rm --build db-isolation-test
+#
+# `run` levanta postgres → postgres-provision (como rds_master) → *-migrate → postgres-finalize y falla
+# si alguno no termina con éxito; después ejecuta la matriz de privilegios DT-09.
+#
+# Requiere además RDS_MASTER_PASSWORD (hexadecimal) en el archivo de entorno.
+services:
+  postgres:
+    environment:
+      RDS_MASTER_PASSWORD: ${RDS_MASTER_PASSWORD:?Define RDS_MASTER_PASSWORD para la emulación RDS}
+    volumes:
+      - ./infra/postgres/rds-emulation/10-rds-master.sql:/docker-entrypoint-initdb.d/10-rds-master.sql:ro
+
+  postgres-provision:
+    environment:
+      PGUSER: rds_master
+      PGPASSWORD: ${RDS_MASTER_PASSWORD:?Define RDS_MASTER_PASSWORD para la emulación RDS}
+
+  postgres-finalize:
+    environment:
+      PGUSER: rds_master
+      PGPASSWORD: ${RDS_MASTER_PASSWORD:?Define RDS_MASTER_PASSWORD para la emulación RDS}

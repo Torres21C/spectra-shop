@@ -32,6 +32,19 @@ SELECT count(*) = 0 AS closed
   SELECT 1 / 0 AS migration_window_still_open;
 \endif
 
+-- AWS-02: en RDS el administrador conserva ADMIN OPTION sobre los roles que creó, pero nunca puede
+-- heredar sus privilegios ni hacer SET ROLE hacia ellos.
+SELECT count(*) = 0 AS no_delegation
+  FROM pg_auth_members am
+  JOIN pg_roles r ON r.oid = am.roleid
+ WHERE r.rolname ~ '^spectra_(identity|catalog|commerce|audit)_(migrator|app)$'
+   AND (am.inherit_option OR am.set_option) \gset
+\if :no_delegation
+\else
+  \echo 'DT-09: queda una pertenencia con INHERIT o SET sobre un rol de servicio'
+  SELECT 1 / 0 AS service_role_delegation_left;
+\endif
+
 COMMIT;
 
 \echo 'DT-09: ventana de migración cerrada'
