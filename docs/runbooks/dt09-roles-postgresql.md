@@ -1,6 +1,6 @@
 # Runbook DT-09 — Roles PostgreSQL por servicio (M06.0)
 
-Este procedimiento aplica, verifica y revierte la separación de credenciales PostgreSQL de M06.0. Decisión: [ADR-M06-0-01](../adr/ADR-M06-0-01-roles-postgresql.md).
+Este procedimiento aplica, verifica y revierte la separación de credenciales PostgreSQL de M06.0. Decisión: [ADR-M06-0-01](../adr/ADR-M06-0-01-roles-postgresql.md). Compatibilidad con Amazon RDS: [ADR-AWS-01](../adr/ADR-AWS-01-aprovisionamiento-rds.md).
 
 ## Modelo
 
@@ -9,9 +9,10 @@ Este procedimiento aplica, verifica y revierte la separación de credenciales Po
 | Identity | `spectra_identity_migrator`                | `spectra_identity_app` |
 | Catalog  | `spectra_catalog_migrator`                 | `spectra_catalog_app`  |
 | Commerce | `spectra_commerce_migrator`                | `spectra_commerce_app` |
+| Audit    | `spectra_audit_migrator`                   | `spectra_audit_app`    |
 
-- `POSTGRES_USER` es el administrador del clúster. Solo lo usan el contenedor `postgres`, `postgres-provision` y `postgres-finalize`; ningún servicio se conecta con él.
-- Los seis roles son `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, sin pertenencias entre sí y con solo `CONNECT` sobre la base.
+- `POSTGRES_USER` es el administrador del clúster. Solo lo usan el contenedor `postgres`, `postgres-provision` y `postgres-finalize`; ningún servicio se conecta con él. En Amazon RDS ese papel lo cumple el usuario maestro (no superusuario): ver «Modo RDS».
+- Los ocho roles son `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, sin pertenencias entre sí y con solo `CONNECT` sobre la base.
 - Cada migrador es propietario de su esquema y de todos sus objetos, incluida `_prisma_migrations`, y no tiene acceso a los otros esquemas.
 - Cada rol de ejecución tiene `USAGE` sobre su esquema y la matriz de `apps/<servicio>/prisma/runtime-grants.sql`. No tiene DDL, `TRUNCATE`, acceso a `_prisma_migrations`, tablas temporales ni acceso a otros esquemas.
 
@@ -22,26 +23,46 @@ postgres (healthy)
   └─ postgres-provision        roles, CONNECT, propiedad, revocaciones y apertura de la ventana de migración
        ├─ identity-migrate     migrate deploy + runtime-grants.sql + seed     (rol migrador)
        ├─ catalog-migrate      migrate deploy + runtime-grants.sql + seed     (rol migrador)
-       └─ commerce-migrate     migrate deploy + runtime-grants.sql            (rol migrador)
+       ├─ commerce-migrate     migrate deploy + runtime-grants.sql            (rol migrador)
+       └─ audit-migrate        migrate deploy + runtime-grants.sql            (rol migrador)
             └─ postgres-finalize   cierra la ventana: revoca CREATE sobre la base a los migradores
-                 └─ identity-service / catalog-service / commerce-service (rol de ejecución)
+                 └─ identity-service / catalog-service / commerce-service / audit-service (rol de ejecución)
 ```
 
-Los Dockerfiles de los servicios ya no migran ni siembran al arrancar.
+Los Dockerfiles de los servicios ya no migran ni siembran al arrancar. `postgres-provision` y `postgres-finalize` usan la imagen `db-ops` (`infra/postgres/Dockerfile`), que contiene los scripts; no montan archivos del host.
 
 **Ventana de migración.** Las migraciones históricas M01 (Catalog) y M03 (Commerce) contienen `CREATE SCHEMA IF NOT EXISTS`. PostgreSQL exige `CREATE` sobre la base antes de comprobar si el esquema existe, de modo que los migradores reciben ese privilegio solo entre `postgres-provision` y `postgres-finalize`. En reposo nadie lo conserva, y `postgres-finalize` falla si algún rol de servicio mantiene `CREATE` o `TEMP`.
 
 ## Credenciales
 
-Genere seis valores distintos fuera del repositorio y cópielos solo en `.env`:
+Genere ocho valores distintos fuera del repositorio y cópielos solo en `.env`:
 
 ```bash
-for role in IDENTITY_MIGRATOR IDENTITY_APP CATALOG_MIGRATOR CATALOG_APP COMMERCE_MIGRATOR COMMERCE_APP; do
+for role in IDENTITY_MIGRATOR IDENTITY_APP CATALOG_MIGRATOR CATALOG_APP COMMERCE_MIGRATOR COMMERCE_APP AUDIT_MIGRATOR AUDIT_APP; do
   echo "SPECTRA_${role}_PASSWORD=$(openssl rand -hex 32)"
 done >> .env   # .env está en .gitignore; no imprima ni registre estos valores
 ```
 
-El aprovisionamiento rechaza valores que no sean hexadecimales de 32 a 128 caracteres o que se repitan. Lee las contraseñas con `\getenv`, de modo que no aparecen en argumentos de proceso, y desactiva el registro de sentencias de su sesión para que no lleguen al log del servidor. Para rotar una contraseña, cambie el valor en `.env` y vuelva a ejecutar `postgres-provision` y el servicio afectado.
+El aprovisionamiento rechaza valores que no sean hexadecimales de 32 a 128 caracteres o que se repitan. Lee las contraseñas con `\getenv`, de modo que no aparecen en argumentos de proceso, y, si se ejecuta como superusuario, desactiva el registro de sentencias de su sesión para que no lleguen al log del servidor (en modo RDS exige que el servidor ya no las registre). Para rotar una contraseña, cambie el valor en `.env` y vuelva a ejecutar `postgres-provision` y el servicio afectado.
+
+## Modo RDS (AWS-02)
+
+`provision-service-roles.sql` detecta si quien lo ejecuta es superusuario. Con un administrador delegado (el usuario maestro de Amazon RDS, con `CREATEROLE` y `CREATEDB` y propietario de la base):
+
+- Exige `log_statement = none` y `log_min_duration_statement = -1` en el servidor (parameter group de RDS); si no se cumplen, aborta sin tocar nada.
+- Omite `NOSUPERUSER`, `NOREPLICATION` y `NOBYPASSRLS` en `ALTER ROLE` (PostgreSQL 16 no se lo permite) y comprueba después que ningún rol de servicio tenga atributos elevados.
+- Se concede `INHERIT` y `SET` sobre los migradores solo dentro de la transacción, para transferir la propiedad de los esquemas, y lo revoca antes del `COMMIT`.
+- Conserva únicamente la `ADMIN OPTION` que PostgreSQL concede al creador de un rol (sin `INHERIT` ni `SET`): puede rotar contraseñas, pero no usar los privilegios de los roles. `postgres-finalize` y `db-isolation-test` fallan ante cualquier otra pertenencia.
+
+Ensayo local sin AWS, en un proyecto desechable con un volumen nuevo (el usuario `rds_master` se crea al inicializar el volumen):
+
+```bash
+rds() { docker compose -p spectra-rds-emu --env-file <env-desechable> \
+  -f compose.yaml -f infra/postgres/rds-emulation/compose.rds-emulation.yaml "$@"; }
+rds --profile test run --rm --build db-isolation-test   # cadena completa como rds_master; debe terminar con failed=0
+```
+
+El archivo de entorno desechable necesita además `RDS_MASTER_PASSWORD`. `rollback-service-roles.sql` **no** está adaptado a RDS (requiere superusuario): en AWS se revierte restaurando un snapshot en una instancia nueva.
 
 ## Volumen nuevo
 

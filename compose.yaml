@@ -19,8 +19,11 @@ services:
   # DT-09 (M06.0): POSTGRES_USER es solo el administrador del clúster. Este job crea los roles de
   # migración y de ejecución de cada servicio, transfiere la propiedad de cada esquema a su migrador y
   # retira privilegios de PUBLIC. Es idempotente y no borra datos.
+  # AWS-03: imagen db-ops (infra/postgres/Dockerfile) con los scripts dentro; la misma que se ejecuta en
+  # ECS con `run-task`. Sin bind mounts del host.
   postgres-provision:
-    image: postgres:16.6-alpine
+    build:
+      context: infra/postgres
     environment:
       PGHOST: postgres
       PGDATABASE: ${POSTGRES_DB:?Define POSTGRES_DB in .env}
@@ -36,8 +39,6 @@ services:
       SPECTRA_AUDIT_APP_PASSWORD: ${SPECTRA_AUDIT_APP_PASSWORD:?Define SPECTRA_AUDIT_APP_PASSWORD in .env}
     command:
       ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', '/provision/provision-service-roles.sql']
-    volumes:
-      - ./infra/postgres/provision-service-roles.sql:/provision/provision-service-roles.sql:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -256,7 +257,8 @@ services:
   # DT-09: cierra la ventana de migración (revoca CREATE sobre la base a los migradores) antes de
   # arrancar cualquier servicio.
   postgres-finalize:
-    image: postgres:16.6-alpine
+    build:
+      context: infra/postgres
     environment:
       PGHOST: postgres
       PGDATABASE: ${POSTGRES_DB:?Define POSTGRES_DB in .env}
@@ -264,8 +266,6 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD in .env}
     command:
       ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', '/provision/finalize-service-roles.sql']
-    volumes:
-      - ./infra/postgres/finalize-service-roles.sql:/provision/finalize-service-roles.sql:ro
     depends_on:
       identity-migrate:
         condition: service_completed_successfully

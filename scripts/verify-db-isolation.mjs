@@ -157,14 +157,22 @@ async function verifyGlobal(client, database) {
       },
     );
   }
+  // AWS-02: en RDS el administrador (no superusuario) recibe de PostgreSQL ADMIN OPTION sobre los roles
+  // que crea. Esa concesión solo permite gestionar el rol (contraseña, pertenencias); sin INHERIT ni SET
+  // no da acceso a sus privilegios. Es la única pertenencia admitida.
   const { rows: memberships } = await client.query(
-    `SELECT count(*)::int AS n FROM pg_auth_members am
-       JOIN pg_roles r ON r.oid = am.roleid JOIN pg_roles m ON m.oid = am.member
-      WHERE r.rolname = ANY($1) OR m.rolname = ANY($1)`,
+    `SELECT count(*) FILTER (WHERE NOT admin_only)::int AS n,
+            count(*) FILTER (WHERE admin_only)::int AS admin_only
+       FROM (SELECT r.rolname = ANY($1) AND NOT m.rolname = ANY($1)
+                    AND am.admin_option AND NOT am.inherit_option AND NOT am.set_option AS admin_only
+               FROM pg_auth_members am
+               JOIN pg_roles r ON r.oid = am.roleid JOIN pg_roles m ON m.oid = am.member
+              WHERE r.rolname = ANY($1) OR m.rolname = ANY($1)) AS grants`,
     [ALL_ROLES],
   );
   record('sin pertenencias entre roles de servicio ni hacia otros roles', memberships[0].n === 0, {
     memberships: memberships[0].n,
+    adminOnlyGrantsToProvisioner: memberships[0].admin_only,
   });
 
   const { rows: pub } = await client.query(

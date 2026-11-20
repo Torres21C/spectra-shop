@@ -78,6 +78,10 @@ jobs:
             echo "::add-mask::$value"
             echo "SPECTRA_${role}_PASSWORD=$value" >> "$GITHUB_ENV"
           done
+          # AWS-02: maestro no superusuario de la emulación RDS (solo en el proyecto spectra-rds-emu).
+          rds_master="$(openssl rand -hex 32)"
+          echo "::add-mask::$rds_master"
+          echo "RDS_MASTER_PASSWORD=$rds_master" >> "$GITHUB_ENV"
       - name: Preparar PostgreSQL de integración
         run: |
           npm run prisma:generate --workspace @spectra/catalog-service
@@ -103,9 +107,16 @@ jobs:
           docker compose --profile test build commerce-test
           docker compose --profile test run --rm commerce-test \
             npm run test:cov --workspace @spectra/commerce-service
+      - name: DT-09 con administrador no superusuario (emulación RDS, AWS-02)
+        run: |
+          rds() { docker compose -p spectra-rds-emu -f compose.yaml -f infra/postgres/rds-emulation/compose.rds-emulation.yaml "$@"; }
+          # `run` levanta postgres → provision (como rds_master) → migraciones → finalize y falla si alguno falla.
+          rds --profile test run --rm db-isolation-test
       - name: Cerrar integración distribuida
         if: always()
-        run: docker compose --profile test down --volumes
+        run: |
+          docker compose --profile test down --volumes
+          docker compose -p spectra-rds-emu -f compose.yaml -f infra/postgres/rds-emulation/compose.rds-emulation.yaml --profile test down --volumes
       - run: npm run build
 
   secrets:
