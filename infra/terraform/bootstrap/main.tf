@@ -46,7 +46,7 @@ resource "aws_kms_alias" "state" {
 resource "aws_s3_bucket" "state" {
   # checkov:skip=CKV_AWS_144:Replicación entre regiones innecesaria para el laboratorio; el versionado protege frente a borrados.
   # checkov:skip=CKV2_AWS_62:Sin notificaciones de eventos: no hay consumidores.
-  # checkov:skip=CKV_AWS_18:Registro de accesos del bucket opcional; CloudTrail registra las llamadas de gestión.
+  # checkov:skip=CKV_AWS_18:PENDIENTE antes de ejecutar bootstrap (R-PR5-26): sin registro de accesos ni eventos de datos de CloudTrail, las lecturas y escrituras del state no quedan auditadas (el historial de eventos solo cubre operaciones de gestión).
   bucket = local.bucket_name
 
   lifecycle {

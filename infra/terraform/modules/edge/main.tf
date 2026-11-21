@@ -325,12 +325,12 @@ resource "aws_cloudfront_response_headers_policy" "api" {
 # Distribución
 # ---------------------------------------------------------------------------------------------------------
 resource "aws_cloudfront_distribution" "this" {
-  # checkov:skip=CKV2_AWS_47:La protección Log4j está activa (AWSManagedRulesKnownBadInputsRuleSet, regla Log4JRCE). La comprobación exige además AWSManagedRulesAnonymousIpList, que bloquearía VPN y proveedores de nube: decisión pendiente del propietario.
+  # checkov:skip=CKV2_AWS_47:La protección Log4j está activa (AWSManagedRulesKnownBadInputsRuleSet, regla Log4JRCE). La comprobación exige además AWSManagedRulesAnonymousIpList; decisión del propietario (2026-11-21): no bloquear VPN ni proveedores de nube y evaluarla en modo Count durante el laboratorio (R-PR5-25).
   # checkov:skip=CKV_AWS_86:Registro estándar de CloudFront opcional; las peticiones se registran en los logs de WAF (con redacción de cookies y tokens).
   # checkov:skip=CKV_AWS_310:Sin failover de origen en el laboratorio (un solo ALB y un solo bucket).
   # checkov:skip=CKV_AWS_374:Sin restricción geográfica: laboratorio académico sin requisito de geobloqueo.
   # Nota (CKV2_AWS_42, no evaluado como fallo por Checkov 3.4.6): Dominio propio opcional (decisión pendiente §18.5); sin él se usa el certificado de *.cloudfront.net.
-  # checkov:skip=CKV_AWS_174:Con el certificado por defecto de *.cloudfront.net no se puede fijar TLS 1.2 mínimo; con dominio propio se usa TLSv1.2_2021.
+  # checkov:skip=CKV_AWS_174:PENDIENTE antes del despliegue (R-PR5-27): con el certificado por defecto de *.cloudfront.net el mínimo es TLSv1; el propietario prefiere dominio propio con TLSv1.2_2021 si es viable.
   enabled             = true
   comment             = "${var.name_prefix}: SPA y API bajo un mismo origen"
   default_root_object = "index.html"

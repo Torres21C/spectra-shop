@@ -1,6 +1,6 @@
 # Arquitectura y matriz de recursos AWS (PR-5)
 
-Estado: **propuesta**, no aplicada. Decisiones: [ADR-AWS-05](../../../docs/adr/ADR-AWS-05-arquitectura-laboratorio-terraform.md).
+Estado: **aceptada para el laboratorio académico** (2026-11-21), no aplicada. Decisiones: [ADR-AWS-05](../../../docs/adr/ADR-AWS-05-arquitectura-laboratorio-terraform.md).
 
 ## 1. Diagrama
 

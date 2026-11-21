@@ -13,6 +13,7 @@ infra/terraform/
   scripts/static-checks.sh              validación completa sin credenciales AWS (local y CI)
   scripts/ci/                           envoltorio de Terraform (bloquea apply/destroy) y Checkov fijado
   scripts/verify-routes.py              rutas de CloudFront/ALB frente a los controladores reales
+  scripts/checkov-exceptions-doc.py     genera y comprueba docs/07 desde los comentarios checkov:skip
   bootstrap/                            bucket S3 + KMS del state (se aplica aparte, una vez)
   modules/
     network/          VPC, subredes privadas por AZ ID, IGW sin rutas, gateway S3, Flow Logs

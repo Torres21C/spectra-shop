@@ -67,6 +67,15 @@ if grep -q 'Parsing errors' "$CHECKOV_OUT"; then echo "FAIL Checkov no pudo anal
 rm -f "$CHECKOV_OUT"
 [ "$checkov_rc" -eq 0 ] || exit "$checkov_rc"
 
+step "Documento de excepciones de Checkov (justificaciones del código y sincronía)"
+# Falla si una excepción no tiene justificación en el código, no está clasificada o el documento difiere.
+CHECKOV_JSON=$(mktemp)
+$CHECKOV -d . --framework terraform --skip-download -o json > "$CHECKOV_JSON" 2>/dev/null || true
+exceptions_rc=0
+python3 -I scripts/checkov-exceptions-doc.py check "$CHECKOV_JSON" docs/07-excepciones-checkov.md || exceptions_rc=$?
+rm -f "$CHECKOV_JSON"
+[ "$exceptions_rc" -eq 0 ] || exit "$exceptions_rc"
+
 step "Trivy (misconfiguración y secretos)"
 # Caché vacía y --skip-check-update: se usan las reglas incluidas en el binario fijado, no un paquete de
 # reglas descargado en el momento, para que el resultado local y el de la CI sean reproducibles.
