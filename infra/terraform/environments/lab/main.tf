@@ -114,6 +114,19 @@ module "registry" {
   keep_images       = var.ecr_keep_images
 }
 
+# PR-6: rol publicador de imágenes para GitHub Actions (OIDC). Desactivado por defecto (enable_ecr_publisher).
+module "ecr_publisher" {
+  source = "../../modules/github_oidc_publisher"
+
+  enabled                    = var.enable_ecr_publisher
+  name_prefix                = local.name_prefix
+  create_oidc_provider       = var.create_github_oidc_provider
+  existing_oidc_provider_arn = var.github_oidc_provider_arn
+  oidc_subject_prefix        = var.github_oidc_subject_prefix
+  github_environment         = var.github_publish_environment
+  repository_arns            = module.registry.repository_arns
+}
+
 module "alb" {
   source = "../../modules/alb"
 

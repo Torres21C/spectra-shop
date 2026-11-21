@@ -98,3 +98,14 @@ output "internet_gateway_id" {
   description = "IGW asociado solo por requisito de CloudFront VPC origins (sin rutas; verificar en EV-AWS-LAB-RED)."
   value       = module.network.internet_gateway_id
 }
+
+output "ecr_publisher_role_arn" {
+  description = "Rol OIDC publicador de ECR (null si enable_ecr_publisher = false). Va en la variable AWS_ECR_PUBLISHER_ROLE_ARN del Environment ecr-publish-lab."
+  value       = module.ecr_publisher.role_arn
+}
+
+output "ecr_publisher_oidc_subject" {
+  description = "Claim sub exacto aceptado por el rol publicador."
+  value       = module.ecr_publisher.oidc_subject
+}
+

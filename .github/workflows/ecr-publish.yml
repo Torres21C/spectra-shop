@@ -1,0 +1,176 @@
+name: ecr-publish
+
+# Publicación MANUAL de las 9 imágenes de un commit de main en Amazon ECR (PR-6, ADR-AWS-06).
+#
+# - Solo workflow_dispatch: ningún push, merge ni PR (tampoco de forks) lo inicia.
+# - verify: el SHA debe ser un commit de la historia first-parent de main y los 5 checks requeridos deben
+#   haber aprobado exactamente ese commit en las ejecuciones push de main. Con publish = true, además, el
+#   Environment ecr-publish-lab debe existir con revisores obligatorios y restringido a main.
+# - build-scan: construye y analiza las imágenes sin credenciales AWS; guarda los archivos OCI y sus digest.
+# - publish: único job con id-token: write. Espera la aprobación del Environment, obtiene credenciales
+#   temporales por OIDC y copia a ECR exactamente los archivos analizados (digest preservado).
+# - Fuera de alcance: despliegue ECS, migraciones, Terraform. Este workflow no contiene esas operaciones.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: SHA completo (40 hex) de un commit de main con los 5 checks aprobados
+        required: true
+        type: string
+      publish:
+        description: Publicar en ECR tras la aprobación del Environment (false = solo verificar, construir y analizar)
+        required: true
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: ecr-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verificar commit y autorizaciones
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      actions: read
+    outputs:
+      sha: ${{ steps.verify.outputs.sha }}
+    steps:
+      - name: Checkout (historia de main, sin credenciales persistidas)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verificar el commit, los checks y el Environment
+        id: verify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          PUBLISH: ${{ inputs.publish }}
+          PUBLISH_ENVIRONMENT: ecr-publish-lab
+        run: scripts/ecr/verify-publish-ref.sh
+
+  build-scan:
+    name: Construir, analizar y empaquetar (sin AWS)
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      digests_sha256: ${{ steps.package.outputs.digests_sha256 }}
+    env:
+      TRIVY_VERSION: 0.76.2
+      TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+      COMMIT_SHA: ${{ needs.verify.outputs.sha }}
+    steps:
+      - name: Checkout del commit verificado
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Instalar Trivy fijado (SHA-256 verificado)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/trivy"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          printf '%s  %s\n' "$TRIVY_SHA256" "$dir/trivy.tar.gz" | sha256sum --check --strict -
+          tar -xzf "$dir/trivy.tar.gz" -C "$dir" trivy
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Construir las 9 imágenes (linux/amd64, archivos OCI)
+        shell: bash
+        run: scripts/ecr/build-images.sh "$RUNNER_TEMP/release"
+
+      - name: Analizar vulnerabilidades, generar SBOM y aplicar la política
+        shell: bash
+        run: scripts/ecr/scan-images.sh "$RUNNER_TEMP/release"
+
+      - name: Empaquetar los resultados
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          sum=$(sha256sum "$RUNNER_TEMP/release/images.json" | cut -d' ' -f1)
+          echo "digests_sha256=$sum" >> "$GITHUB_OUTPUT"
+          python3 -I scripts/ecr/release_tool.py summary "$RUNNER_TEMP/release" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar imágenes OCI, SBOM e informes
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ecr-release-${{ needs.verify.outputs.sha }}
+          path: ${{ runner.temp }}/release/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publicar en ECR (OIDC, aprobación del Environment)
+    needs: [verify, build-scan]
+    if: github.ref == 'refs/heads/main' && inputs.publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ecr-publish-lab
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      COMMIT_SHA: ${{ needs.verify.outputs.sha }}
+      EXPECTED_DIGESTS_SHA256: ${{ needs.build-scan.outputs.digests_sha256 }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_ECR_PUBLISHER_ROLE_ARN: ${{ vars.AWS_ECR_PUBLISHER_ROLE_ARN }}
+    steps:
+      - name: Checkout del commit verificado (scripts de publicación)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Comprobar la configuración del Environment
+        shell: bash
+        run: scripts/ecr/check-publish-config.sh
+
+      - name: Descargar las imágenes analizadas
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ecr-release-${{ needs.verify.outputs.sha }}
+          path: ${{ runner.temp }}/release
+
+      - name: Verificar la integridad de las imágenes descargadas
+        shell: bash
+        run: python3 -I scripts/ecr/release_tool.py verify-release "$RUNNER_TEMP/release" --sha "$COMMIT_SHA" --expected-images-sha256 "$EXPECTED_DIGESTS_SHA256"
+
+      - name: Credenciales temporales por OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUBLISHER_ROLE_ARN }}
+          role-session-name: spectra-ecr-publish-${{ github.run_id }}
+          role-duration-seconds: 3600
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Publicar (sin sobrescribir etiquetas) y verificar los digest en ECR
+        shell: bash
+        run: scripts/ecr/publish-images.sh "$RUNNER_TEMP/release"
+
+      - name: Guardar el manifiesto de publicación
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ecr-release-manifest-${{ needs.verify.outputs.sha }}
+          path: ${{ runner.temp }}/release/release-manifest.json
+          retention-days: 90
+          if-no-files-found: warn
