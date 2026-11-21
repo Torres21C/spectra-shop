@@ -1,0 +1,94 @@
+name: iac
+
+# Validación estática de la infraestructura como código (infra/terraform). Ejecuta el mismo script que se usa
+# en local (infra/terraform/scripts/static-checks.sh). No configura credenciales AWS ni OIDC: el job no puede
+# autenticarse en ninguna cuenta. Terraform se instala detrás de un envoltorio (scripts/ci/terraform-guard.sh)
+# que solo admite fmt, init -backend=false, validate, test y version.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: Terraform (validación estática, sin AWS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      TERRAFORM_VERSION: 1.17.2
+      TERRAFORM_SHA256: e6f16b2f0b137ee5729caa8c4e79a3bae4ee261acd198a1fcfa8584a6296605b
+      TFLINT_VERSION: 0.66.0
+      TFLINT_SHA256: 22be11cadc25cd02401e94c0ccc91aa63467debb8485c2a755d98f4c0a9d1e2e
+      TRIVY_VERSION: 0.76.2
+      TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+      CHECKOV_VERSION: 3.4.6
+      CHECKOV_IMAGE: bridgecrew/checkov@sha256:b4b7e9d419ddb9ae7a257678ee39cb5d9e5569f604723297dd9cec7fd4571bff
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: '0'
+      CHECKPOINT_DISABLE: '1'
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Instalar herramientas fijadas (SHA-256 verificado)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/iac-tools"
+          mkdir -p "$tools/descargas" "$tools/bin" "$tools/real" "$RUNNER_TEMP/tf-plugin-cache"
+          cd "$tools/descargas"
+          curl -fsSL --retry 3 -o terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSL --retry 3 -o tflint.zip \
+            "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          curl -fsSL --retry 3 -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          printf '%s  terraform.zip\n%s  tflint.zip\n%s  trivy.tar.gz\n' \
+            "$TERRAFORM_SHA256" "$TFLINT_SHA256" "$TRIVY_SHA256" | sha256sum --check --strict -
+          unzip -q terraform.zip terraform -d "$tools/real"
+          unzip -q tflint.zip tflint -d "$tools/bin"
+          tar -xzf trivy.tar.gz -C "$tools/bin" trivy
+          install -m 0755 "$GITHUB_WORKSPACE/infra/terraform/scripts/ci/terraform-guard.sh" "$tools/bin/terraform"
+          install -m 0755 "$GITHUB_WORKSPACE/infra/terraform/scripts/ci/checkov-docker.sh" "$tools/bin/checkov"
+          docker pull --quiet "$CHECKOV_IMAGE"
+          echo "$tools/bin" >> "$GITHUB_PATH"
+          echo "TERRAFORM_REAL=$tools/real/terraform" >> "$GITHUB_ENV"
+          echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tf-plugin-cache" >> "$GITHUB_ENV"
+
+      - name: Comprobar versiones
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform version | head -n 1 | grep -Fx "Terraform v${TERRAFORM_VERSION}"
+          tflint --version | head -n 1 | grep -Fx "TFLint version ${TFLINT_VERSION}"
+          trivy --version | head -n 1 | grep -Fx "Version: ${TRIVY_VERSION}"
+          checkov --version | grep -Fx "${CHECKOV_VERSION}"
+          python3 --version
+
+      - name: Validación estática de Terraform
+        shell: bash
+        run: |
+          set -o pipefail
+          infra/terraform/scripts/static-checks.sh 2>&1 | tee "$RUNNER_TEMP/iac-static-checks.log"
+
+      - name: Guardar el log de la validación
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: iac-static-checks
+          path: ${{ runner.temp }}/iac-static-checks.log
+          if-no-files-found: warn
