@@ -73,10 +73,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          terraform version | head -n 1 | grep -Fx "Terraform v${TERRAFORM_VERSION}"
-          tflint --version | head -n 1 | grep -Fx "TFLint version ${TFLINT_VERSION}"
-          trivy --version | head -n 1 | grep -Fx "Version: ${TRIVY_VERSION}"
-          checkov --version | grep -Fx "${CHECKOV_VERSION}"
+          expect_first_line() { # esperado, comando...
+            local want=$1 out
+            shift
+            out=$("$@")
+            printf '%s\n' "${out%%$'\n'*}"
+            [ "${out%%$'\n'*}" = "$want" ] || { echo "Versión inesperada; se esperaba: $want" >&2; exit 1; }
+          }
+          expect_first_line "Terraform v${TERRAFORM_VERSION}" terraform version
+          expect_first_line "TFLint version ${TFLINT_VERSION}" tflint --version
+          expect_first_line "Version: ${TRIVY_VERSION}" trivy --version
+          expect_first_line "${CHECKOV_VERSION}" checkov --version
           python3 --version
 
       - name: Validación estática de Terraform
