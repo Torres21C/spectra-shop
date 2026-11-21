@@ -23,6 +23,7 @@ infra/terraform/
     database/         RDS PostgreSQL 16 privado, parameter group DT-09, logs exportados
     secrets/          secretos DT-09 y tokens (ephemeral + write-only, fuera del state)
     registry/         5 repositorios ECR inmutables con escaneo y ciclo de vida
+    github_oidc_publisher/  rol OIDC publicador de ECR para GitHub Actions (PR-6; desactivado)
     alb/              ALB interno, target groups (/health/ready) y reglas por ruta
     edge/             S3 + OAC + CMK, VPC origin, CloudFront, cabeceras, WAF y sus logs
     observability/    log groups, filtros de métricas, alarmas, SNS y Budgets
@@ -47,6 +48,10 @@ Se partió de la estructura propuesta para PR-5 con dos ajustes:
 | [docs/05-validacion-estatica.md](docs/05-validacion-estatica.md)         | Evidencias de la validación estática        |
 | [docs/06-prerrequisitos-pr6-pr7.md](docs/06-prerrequisitos-pr6-pr7.md)   | Prerrequisitos de PR-6 y PR-7               |
 | [docs/07-excepciones-checkov.md](docs/07-excepciones-checkov.md)         | Las 57 excepciones de Checkov, clasificadas |
+
+## Publicación de imágenes (PR-6)
+
+El workflow manual [`ecr-publish`](../../.github/workflows/ecr-publish.yml) construye, analiza y publica las 9 imágenes de un commit de `main` en los repositorios del módulo `registry`, con el rol del módulo `github_oidc_publisher` (desactivado hasta que el propietario lo autorice). Decisiones: [ADR-AWS-06](../../docs/adr/ADR-AWS-06-publicacion-ecr-oidc.md). Operación: [docs/operacion-y-aws/05-publicacion-ecr.md](../../docs/operacion-y-aws/05-publicacion-ecr.md).
 
 ## Validación en la CI
 

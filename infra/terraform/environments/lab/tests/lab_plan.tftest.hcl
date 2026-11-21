@@ -53,6 +53,16 @@ run "plan_with_defaults" {
     condition     = length(output.ops_task_definition_families) == 6
     error_message = "Deben existir las 6 tareas DT-09 (provision, 4 migrate, finalize)."
   }
+
+  assert {
+    condition     = output.ecr_publisher_role_arn == null && length(module.ecr_publisher.oidc_provider_arn == null ? [] : [1]) == 0
+    error_message = "PR-6: el rol publicador OIDC y el proveedor deben estar desactivados por defecto."
+  }
+
+  assert {
+    condition     = output.ecr_publisher_oidc_subject == "repo:Torres21C@84191196/spectra-shop@1457499804:environment:ecr-publish-lab"
+    error_message = "PR-6: el sub aceptado debe ser el del Environment ecr-publish-lab de este repositorio (formato inmutable)."
+  }
 }
 
 run "rejects_trust_proxy_true" {
