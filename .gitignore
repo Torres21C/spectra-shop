@@ -49,3 +49,7 @@ backend.hcl
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Python (scripts del pipeline de publicación, PR-6)
+__pycache__/
+*.pyc

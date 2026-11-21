@@ -399,42 +399,61 @@ def dev_only_packages(lockfile: Path) -> set:
     return dev - prod
 
 
-def npm_components(sbom: dict) -> set:
-    found = set()
+def component_path(component: dict) -> str:
+    for prop in component.get("properties") or []:
+        if prop.get("name") in ("aquasecurity:trivy:FilePath", "aquasecurity:trivy:PkgPath"):
+            return prop.get("value") or ""
+    return ""
+
+
+def npm_components(sbom: dict) -> tuple:
+    """(paquetes de la aplicación en /app, paquetes npm de la imagen base fuera de /app)."""
+    app, base = set(), set()
     for component in sbom.get("components") or []:
         purl = component.get("purl") or ""
-        if purl.startswith("pkg:npm/"):
-            found.add((component.get("group") + "/" + component["name"] if component.get("group") else component["name"],
-                       component.get("version", "")))
-    return found
+        if not purl.startswith("pkg:npm/"):
+            continue
+        name = component.get("group") + "/" + component["name"] if component.get("group") else component["name"]
+        entry = (name, component.get("version", ""))
+        (app if component_path(component).startswith("app/") else base).add(entry)
+    return app, base
 
 
 def cmd_runtime_contents(args) -> None:
+    """Las dependencias de la APLICACIÓN (/app/node_modules) de las imágenes runtime no incluyen paquetes que el
+    lockfile solo instala como dev/devOptional ni herramientas de la lista de exclusión. Los paquetes npm de la
+    imagen base (CLI de npm, yarn en /usr/local y /opt) no son dependencias de la aplicación: se cuentan aparte y
+    sus vulnerabilidades las cubre la política de vulnerabilidades."""
     release = Path(args.release)
     dev_only = dev_only_packages(Path(args.lockfile))
     problems = []
+    base_packages = {}
     checked = 0
     for image in IMAGES:
         if image["kind"] != "runtime":
             continue
         sbom = json.loads((release / "sbom" / f"{image['name']}.cdx.json").read_text())
-        components = npm_components(sbom)
-        if not components:
-            fail(f"{image['name']}: el SBOM no contiene paquetes npm (SBOM vacío o ilegible)")
+        app, base = npm_components(sbom)
+        if not app:
+            fail(f"{image['name']}: el SBOM no contiene paquetes npm de /app (SBOM vacío o sin rutas)")
         checked += 1
-        for name, version in sorted(components):
+        base_packages[image["name"]] = len(base)
+        for name, version in sorted(app):
             if (name, version) in dev_only:
                 problems.append(f"{image['name']}: {name}@{version} es dependencia de desarrollo")
             elif name in RUNTIME_DENYLIST:
                 problems.append(f"{image['name']}: {name}@{version} está en la lista de exclusión de runtime")
     report = {"schema": "spectra-runtime-contents/v1", "checked_images": checked, "problems": problems,
-              "status": "fail" if problems else "pass"}
+              "base_image_npm_packages": base_packages, "status": "fail" if problems else "pass"}
     (release / "runtime-contents.json").write_text(json.dumps(report, indent=2) + "\n")
     for p in problems:
         print("FAIL", p)
+    for name, count in base_packages.items():
+        if count:
+            print(f"AVISO {name}: {count} paquetes npm de la imagen base fuera de /app (CLI de npm/yarn)")
     if problems:
         fail("hay dependencias de desarrollo en imágenes runtime")
-    print(f"OK   {checked} imágenes runtime sin dependencias de desarrollo")
+    print(f"OK   {checked} imágenes runtime sin dependencias de desarrollo en /app")
 
 
 # ------------------------------------------------------------------------ verificación antes de publicar

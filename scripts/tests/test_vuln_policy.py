@@ -119,8 +119,10 @@ class RuntimeContentsTests(unittest.TestCase):
 
     PROD = {"node_modules/@nestjs/core": {"version": "11.0.0"}}
 
-    def comp(self, name, version, group=None):
-        return {"name": name, "version": version, "group": group, "purl": f"pkg:npm/{name}@{version}"}
+    def comp(self, name, version, group=None, root="app"):
+        full = f"{group}/{name}" if group else name
+        return {"name": name, "version": version, "group": group, "purl": f"pkg:npm/{name}@{version}",
+                "properties": [{"name": "aquasecurity:trivy:FilePath", "value": f"{root}/node_modules/{full}/package.json"}]}
 
     def test_production_only_passes(self):
         self.assertEqual(self.run_check([self.comp("core", "11.0.0", "@nestjs")], self.PROD), 0)
@@ -140,6 +142,21 @@ class RuntimeContentsTests(unittest.TestCase):
 
     def test_denylisted_tool_fails_even_if_not_in_lockfile(self):
         self.assertEqual(self.run_check([self.comp("core", "11.0.0", "@nestjs"), self.comp("picomatch", "4.0.7")], self.PROD), 1)
+
+    def test_base_image_npm_cli_is_not_an_app_dependency(self):
+        # El CLI de npm de la imagen base trae paquetes con el mismo nombre y versión que devDependencies del repo:
+        # no son dependencias de la aplicación (sus vulnerabilidades las cubre la política de vulnerabilidades).
+        lock = {**self.PROD, "node_modules/spdx-expression-parse": {"version": "4.0.0", "dev": True}}
+        comps = [self.comp("core", "11.0.0", "@nestjs"), self.comp("spdx-expression-parse", "4.0.0", root="usr/local/lib/node_modules/npm")]
+        self.assertEqual(self.run_check(comps, lock), 0)
+
+    def test_dev_dependency_under_app_is_detected_even_if_also_in_base(self):
+        lock = {**self.PROD, "node_modules/spdx-expression-parse": {"version": "4.0.0", "dev": True}}
+        comps = [self.comp("core", "11.0.0", "@nestjs"), self.comp("spdx-expression-parse", "4.0.0")]
+        self.assertEqual(self.run_check(comps, lock), 1)
+
+    def test_sbom_without_app_packages_fails(self):
+        self.assertEqual(self.run_check([self.comp("npm", "11.0.0", root="usr/local/lib")], self.PROD), 1)
 
     def test_empty_sbom_fails(self):
         self.assertEqual(self.run_check([], self.PROD), 1)

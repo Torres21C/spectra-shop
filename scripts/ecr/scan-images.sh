@@ -21,10 +21,16 @@ trivy version --cache-dir "$CACHE" --format json > "$REL/scans/trivy-version.jso
 
 while IFS=$'\t' read -r name _repository _kind _context _dockerfile _target _suffix archive; do
   echo "== $name"
-  trivy image --cache-dir "$CACHE" --skip-db-update --quiet --input "$REL/$archive" \
+  # Trivy lee un directorio con el layout OCI (no un .tar OCI): se extrae el mismo archivo cuyos blobs ya
+  # verificó build-images.sh; lo que se publica sigue siendo el .tar.
+  layout="$CACHE/layout/$name"
+  mkdir -p "$layout"
+  tar -xf "$REL/$archive" -C "$layout"
+  trivy image --cache-dir "$CACHE" --skip-db-update --quiet --input "$layout" \
     --scanners vuln,secret --format json --output "$REL/scans/$name.trivy.json"
-  trivy image --cache-dir "$CACHE" --skip-db-update --quiet --input "$REL/$archive" \
+  trivy image --cache-dir "$CACHE" --skip-db-update --quiet --input "$layout" \
     --format cyclonedx --output "$REL/sbom/$name.cdx.json"
+  rm -rf "$layout"
 done < <($TOOL images)
 
 $TOOL vuln-policy "$REL" --exceptions security/image-vulnerability-exceptions.json

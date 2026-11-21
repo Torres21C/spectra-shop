@@ -33,12 +33,28 @@ Todos tienen `ecr:GetAuthorizationToken` (no admite permisos por recurso), `ecr:
 
 ### 1.3 Otras identidades
 
-| Identidad                                                        | Permisos                                                                                                                    | Estado                                                               |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `spectra-lab-vpc-flow-logs`                                      | `logs:CreateLogStream`, `logs:PutLogEvents` y `logs:DescribeLogStreams` sobre su log group                                  | PR-5                                                                 |
-| Principales de servicio en las políticas de clave                | CloudWatch Logs (log groups de la cuenta), CloudWatch (SNS cifrado), CloudFront (solo la distribución, en la CMK de la SPA) | PR-5                                                                 |
-| Rol de despliegue OIDC de GitHub                                 | ECR push, actualización de ECS, `s3 sync` y CloudFront                                                                      | **No creado: PR-6** ([prerrequisitos](06-prerrequisitos-pr6-pr7.md)) |
-| Operadores humanos (Identity Center, `Lab-Admin`/`Lab-ReadOnly`) | —                                                                                                                           | Fuera de Terraform (cuenta)                                          |
+| Identidad                                                                                               | Permisos                                                                                                                    | Estado                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `spectra-lab-vpc-flow-logs`                                                                             | `logs:CreateLogStream`, `logs:PutLogEvents` y `logs:DescribeLogStreams` sobre su log group                                  | PR-5                                                                                                                         |
+| Principales de servicio en las políticas de clave                                                       | CloudWatch Logs (log groups de la cuenta), CloudWatch (SNS cifrado), CloudFront (solo la distribución, en la CMK de la SPA) | PR-5                                                                                                                         |
+| Rol publicador OIDC `spectra-lab-ecr-publisher` (**PR-6**, desactivado: `enable_ecr_publisher = false`) | Solo publicar en los 5 repositorios ECR (§1.4)                                                                              | `aud` y `sub` exactos del Environment `ecr-publish-lab` ([ADR-AWS-06](../../../docs/adr/ADR-AWS-06-publicacion-ecr-oidc.md)) |
+| Rol de despliegue OIDC (**PR-7, futuro**; distinto del publicador)                                      | actualización de ECS, `s3 sync` y CloudFront                                                                                | **No creado: PR-7** ([prerrequisitos](06-prerrequisitos-pr6-pr7.md))                                                         |
+| Operadores humanos (Identity Center, `Lab-Admin`/`Lab-ReadOnly`)                                        | —                                                                                                                           | Fuera de Terraform (cuenta)                                                                                                  |
+
+### 1.4 Rol publicador de ECR (PR-6)
+
+Confianza: `sts:AssumeRoleWithWebIdentity` desde el proveedor `token.actions.githubusercontent.com`, con `StringEquals` sobre `aud = sts.amazonaws.com` y `sub = repo:Torres21C@84191196/spectra-shop@1457499804:environment:ecr-publish-lab`. Sesión de 1 hora como máximo. Lo usa solo el job `publish` del workflow `ecr-publish`.
+
+| Acción                                                                      | Recurso        | Por qué                                                                               |
+| --------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------- |
+| `ecr:GetAuthorizationToken`                                                 | `*`            | Inicio de sesión en el registro; la acción no admite restricción por recurso          |
+| `ecr:BatchCheckLayerAvailability`                                           | 5 repositorios | Saber qué capas ya existen antes de subir                                             |
+| `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload` | 5 repositorios | Subir las capas                                                                       |
+| `ecr:PutImage`                                                              | 5 repositorios | Registrar el manifiesto con su etiqueta (inmutable)                                   |
+| `ecr:BatchGetImage`                                                         | 5 repositorios | Incluida en la política de publicación documentada por AWS (`image-push-iam`)         |
+| `ecr:DescribeImages`                                                        | 5 repositorios | Comprobar si la etiqueta ya existe (sin sobrescribir) y verificar el digest publicado |
+
+**No tiene:** KMS (ECR cifra con su propia concesión sobre la CMK; se confirma en P-PUB-1), `ecr:BatchDeleteImage`, `ecr:PutImageTagMutability`, `ecr:SetRepositoryPolicy`, `ecr:PutLifecyclePolicy`, ni permisos de ECS, IAM, Secrets Manager, S3, STS, CloudFormation o CloudWatch Logs. Lo comprueban las pruebas de `tests/modules_publisher.tftest.hcl`.
 
 ## 2. Accesos de red
 

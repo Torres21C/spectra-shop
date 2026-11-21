@@ -135,3 +135,16 @@ No usa credenciales: `fmt`, `init -backend=false`, `validate`, `terraform test` 
 - La CI ejecuta el mismo script en el workflow `iac` (`.github/workflows/iac.yml`), con las mismas versiones fijadas.
 - Checkov debe estar **completo**. La fórmula de Homebrew 3.4.6 no trae las comprobaciones de grafo; si el script lo detecta, usa la imagen oficial fijada (`scripts/ci/checkov-docker.sh`, requiere Docker) o falla.
 - Trivy usa las reglas incluidas en su binario (caché vacía), igual que en la CI.
+
+## 7. Rol publicador de imágenes (PR-6, desactivado)
+
+`enable_ecr_publisher = false` por defecto: no se crea nada. Para la primera publicación, con autorización (guía: `docs/operacion-y-aws/05-publicacion-ecr.md`, §3):
+
+```hcl
+enable_ecr_publisher = true
+# Si la cuenta ya tiene el proveedor OIDC de GitHub (aws iam list-open-id-connect-providers):
+# create_github_oidc_provider = false
+# github_oidc_provider_arn    = "arn:aws:iam::<cuenta>:oidc-provider/token.actions.githubusercontent.com"
+```
+
+`github_oidc_subject_prefix` contiene el prefijo inmutable del `sub` del repositorio (`gh api repos/Torres21C/spectra-shop/actions/oidc/customization/sub`) y `github_publish_environment` = `ecr-publish-lab`. La salida `ecr_publisher_role_arn` va en la variable `AWS_ECR_PUBLISHER_ROLE_ARN` del Environment (no es un secreto). Después de publicar, `image_tag` = SHA del commit publicado.

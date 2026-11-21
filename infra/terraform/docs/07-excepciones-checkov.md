@@ -3,7 +3,7 @@
 > [!NOTE]
 > Documento generado con `scripts/checkov-exceptions-doc.py` a partir de Checkov y de los comentarios `checkov:skip` del código. `scripts/static-checks.sh` (local y CI) comprueba que coincide con el código y que ninguna justificación está vacía. No se edita a mano.
 
-- **Checkov 3.4.6 completo** (imagen oficial fijada por digest en `scripts/ci/checkov-docker.sh`, la misma que usa la CI), framework terraform, sobre `infra/terraform`: **405 superados, 0 fallidos y 57 excepciones**, sin errores de análisis.
+- **Checkov 3.4.6 completo** (imagen oficial fijada por digest en `scripts/ci/checkov-docker.sh`, la misma que usa la CI), framework terraform, sobre `infra/terraform`: **408 superados, 0 fallidos y 57 excepciones**, sin errores de análisis.
 - Cada excepción es un comentario `checkov:skip=<ID>:<justificación>` en el recurso. Revisión del 2026-11-21 con Checkov completo sobre una copia **sin ninguna anotación**: 54 fallos reales, todos cubiertos, más **3 excepciones preventivas** (◇), que Checkov no detecta porque la retención llega por variable o los registros del ALB por un bloque dinámico, aunque la configuración real sí se desvía.
 - **Corrección respecto de la primera versión (32 excepciones, 355 superados).** Aquel resultado se obtuvo con la fórmula de Homebrew de Checkov 3.4.6, que no incluye las comprobaciones de grafo. El primer job de IaC en la CI encontró 25 fallos más:
   - **10 anotaciones restauradas** (11 excepciones; _Restaurada_) que `b62e968` había convertido en notas.

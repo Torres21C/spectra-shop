@@ -8,6 +8,7 @@ Documentación operativa de SPECTRA Shop sobre `main` = `2a27350` (MVP con M06/M
 | [02-guia-operacion-local.md](02-guia-operacion-local.md) | Levantar, operar, respaldar, probar y diagnosticar el stack local paso a paso                                                  |
 | [03-diagnostico-aws.md](03-diagnostico-aws.md)           | Hallazgos clasificados (bloqueante, necesario, recomendado, diferido) para desplegar en AWS                                    |
 | [04-plan-despliegue-aws.md](04-plan-despliegue-aws.md)   | **Propuesta** de arquitectura y procedimiento de laboratorio (ECS Fargate, RDS, CloudFront), costos, destrucción y plan por PR |
+| [05-publicacion-ecr.md](05-publicacion-ecr.md)           | Publicación manual de las 9 imágenes en ECR con OIDC (PR-6): Environment, protección de `main`, fallos seguros y excepciones   |
 | [postman/](postman/README.md)                            | Colecciones Postman v2.1 (por servicio y flujo E2E), entornos y guía de ejecución                                              |
 
 > [!WARNING]

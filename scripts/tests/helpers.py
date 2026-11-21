@@ -63,7 +63,8 @@ def make_release(tool, release: Path, sha: str = SHA) -> dict:
     for image in tool.IMAGES:
         (release / "scans" / f"{image['name']}.trivy.json").write_text(json.dumps({"Results": []}))
         (release / "sbom" / f"{image['name']}.cdx.json").write_text(json.dumps({"components": [
-            {"name": "core", "group": "@nestjs", "version": "11.0.0", "purl": "pkg:npm/%40nestjs/core@11.0.0"}]}))
+            {"name": "core", "group": "@nestjs", "version": "11.0.0", "purl": "pkg:npm/%40nestjs/core@11.0.0",
+             "properties": [{"name": "aquasecurity:trivy:FilePath", "value": "app/node_modules/@nestjs/core/package.json"}]}]}))
     for report in ("policy-report.json", "runtime-contents.json"):
         (release / report).write_text(json.dumps({"status": "pass", "excepted": []}))
     return json.loads((release / "images.json").read_text())
