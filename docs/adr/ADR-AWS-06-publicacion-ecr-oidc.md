@@ -81,7 +81,7 @@ La alternativa de un registro intermedio (GHCR) evitaría el artefacto, pero exi
   3. Crear el Environment y sus variables.
   4. Proteger `main`.
   5. Ejecutar el workflow con `publish = true`.
-- **Bloqueante para la primera publicación:** el ensayo local del 2026-11-21 muestra que las imágenes actuales de `main` **no superan la política**. Hay CRITICAL y HIGH corregibles en las imágenes base: Alpine 3.21.3 (EOSL), el CLI de npm y `gosu` en `db-ops`. Las dependencias de la aplicación no tienen ninguno. Hace falta un PR que actualice las imágenes base y retire herramientas innecesarias (decisión del propietario). Diagnóstico y propuesta: [06-diagnostico-imagenes-base.md](../operacion-y-aws/06-diagnostico-imagenes-base.md). El pipeline funciona como se diseñó: no publica.
+- **Bloqueante para la primera publicación:** el ensayo local del 2026-11-21 muestra que las imágenes actuales de `main` **no superan la política**. Hay CRITICAL y HIGH corregibles en las imágenes base: Alpine 3.21.3 (EOSL), el CLI de npm y `gosu` en `db-ops`. Las dependencias de la aplicación no tienen ninguno. Hace falta un PR que actualice las imágenes base y retire herramientas innecesarias (decisión del propietario). Diagnóstico y propuesta: [06-diagnostico-imagenes-base.md](../operacion-y-aws/06-diagnostico-imagenes-base.md). **Corregido en PR-6.1** (en revisión): 0 CRITICAL/HIGH en las 9 imágenes, con la política sin cambios (§7 del diagnóstico). El pipeline funciona como se diseñó: no publica.
 - Pruebas pendientes en AWS:
   - **P-PUB-1:** primera publicación real; confirmar que no hace falta KMS y que `skopeo` preserva el digest en ECR.
   - **P-PUB-2:** una segunda ejecución del mismo SHA es idempotente.

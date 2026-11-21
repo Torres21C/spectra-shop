@@ -16,6 +16,7 @@ No bloquean el merge de PR-5, pero sí la ejecución. Ver ADR-AWS-05, «Aceptaci
 
 > [!WARNING]
 > **Bloqueante para la primera publicación (R-PR6-10):** las imágenes actuales no superan la política de vulnerabilidades por sus imágenes base (Alpine 3.21.3 fuera de soporte, CLI de npm y `gosu`). Hace falta actualizar los Dockerfiles en un PR aparte, con decisión del propietario. Detalle en `docs/operacion-y-aws/05-publicacion-ecr.md`.
+> **Estado:** corregido en PR-6.1 (pendiente de merge): 0 CRITICAL/HIGH en las 9 imágenes (`docs/operacion-y-aws/06-diagnostico-imagenes-base.md`, §7).
 
 PR-6 implementa la **publicación** (ADR-AWS-06; guía en `docs/operacion-y-aws/05-publicacion-ecr.md`). El **despliegue** (6.5 y 6.6) pasa a PR-7 con un rol distinto.
 
