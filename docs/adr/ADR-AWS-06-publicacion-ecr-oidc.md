@@ -1,6 +1,6 @@
 # ADR-AWS-06 — Publicación de imágenes en Amazon ECR con GitHub Actions y OIDC
 
-- **Estado:** propuesta (PR-6). Decisiones del propietario del 2026-11-21: separar `verify`, `build-scan` y `publish`; módulo Terraform independiente y desactivado; Environment `ecr-publish-lab` con aprobación humana y solo `main`; política de vulnerabilidades; `linux/amd64`; publicación solo manual. **No se ha publicado ninguna imagen ni creado ningún recurso AWS.**
+- **Estado:** **aceptada** por el propietario el 2026-11-21 (PR-6, PR #18). Recoge sus decisiones de ese día: separar `verify`, `build-scan` y `publish`; módulo Terraform independiente y desactivado; Environment `ecr-publish-lab` con aprobación humana y solo `main`; política de vulnerabilidades; `linux/amd64`; publicación solo manual; OIDC solo en el job `publish`. **No se ha publicado ninguna imagen ni creado ningún recurso AWS.** Aceptar esta ADR no autoriza publicar: antes hay que resolver R-PR6-10 (PR-6.1) y completar los pasos de la guía de publicación (§3).
 - **Fecha:** 2026-11-21 · **Código de referencia:** `main` = `0e3758c` (PR #12–#17 fusionados).
 - **Relacionado:** [ADR-AWS-03](ADR-AWS-03-imagenes-runtime.md) (imágenes `runtime` y `migrate`), [ADR-AWS-05](ADR-AWS-05-arquitectura-laboratorio-terraform.md) (repositorios ECR y task definitions), [plan de despliegue §10](../operacion-y-aws/04-plan-despliegue-aws.md) y la [guía de publicación](../operacion-y-aws/05-publicacion-ecr.md).
 
