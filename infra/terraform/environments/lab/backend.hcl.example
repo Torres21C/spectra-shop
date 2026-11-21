@@ -1,0 +1,7 @@
+# Copie a backend.hcl (ignorado por Git) y complete con las salidas de infra/terraform/bootstrap.
+bucket       = "<state-bucket-de-bootstrap>"
+key          = "spectra-shop/lab/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+kms_key_id   = "<arn-de-la-clave-kms-del-state>"
+use_lockfile = true

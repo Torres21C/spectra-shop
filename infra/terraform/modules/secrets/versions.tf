@@ -1,0 +1,15 @@
+terraform {
+  required_version = ">= 1.11.0, < 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.70.0, < 7.0.0"
+    }
+    # ephemeral "random_password": las contraseñas nunca se persisten en el state.
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.9.0, < 4.0.0"
+    }
+  }
+}

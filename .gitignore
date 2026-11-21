@@ -36,6 +36,12 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+# PR-5: variables, planes y configuración de backend pueden contener datos de la cuenta; nunca se versionan.
+*.tfvars
+*.tfvars.json
+*.tfplan
+tfplan
+backend.hcl
 !*.tfvars.example
 
 # Editors and operating systems

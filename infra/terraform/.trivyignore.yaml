@@ -1,0 +1,33 @@
+# Excepciones de Trivy (misconfiguración IaC) del laboratorio, con su justificación. Son las mismas
+# decisiones anotadas para Checkov en el código (checkov:skip). Ver README, «Validación», y ADR-AWS-05.
+misconfigurations:
+  - id: AWS-0054
+    paths:
+      - 'modules/alb/main.tf'
+    statement: >-
+      C5, desviación de laboratorio propuesta (ADR-AWS-05 D-AWS-05-06, aprobada como propuesta el
+      2026-11-21): listener HTTP en un ALB INTERNO sin IP pública, alcanzable solo por CloudFront VPC origin
+      (SG con origen único). TLS público termina en CloudFront. No equivale a TLS extremo a extremo.
+  - id: AWS-0034
+    paths:
+      - 'modules/ecs/main.tf'
+    statement: 'Container Insights tiene costo; configurable con la variable container_insights.'
+  - id: AWS-0089
+    paths:
+      - 'modules/edge/main.tf'
+      - 'bootstrap/main.tf'
+    statement: >-
+      Sin registro de accesos de S3: la SPA solo la lee CloudFront (OAC) y las peticiones quedan en los logs
+      de WAF; el bucket del state lo auditan CloudTrail (gestión) y el versionado.
+  - id: AWS-0010
+    paths:
+      - 'modules/edge/main.tf'
+    statement: 'Registro estándar de CloudFront opcional; los logs de WAF registran todas las peticiones con redacción de credenciales.'
+  - id: AWS-0133
+    paths:
+      - 'modules/database/main.tf'
+    statement: 'Performance Insights desactivado por costo en el laboratorio (métricas básicas y alarmas de CloudWatch).'
+  - id: AWS-0176
+    paths:
+      - 'modules/database/main.tf'
+    statement: 'DT-09 usa roles PostgreSQL con contraseña por servicio; la autenticación IAM de RDS no está implementada en los servicios.'
