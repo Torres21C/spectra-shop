@@ -95,7 +95,7 @@ data "aws_iam_policy_document" "jwt_key" {
 }
 
 resource "aws_kms_key" "jwt" {
-  # checkov:skip=CKV_AWS_7:KMS no admite rotación automática de claves asimétricas; rotación manual (ADR-AWS-02).
+  # Nota (CKV_AWS_7, no evaluado como fallo por Checkov 3.4.6): KMS no admite rotación automática de claves asimétricas; rotación manual (ADR-AWS-02).
   description              = "${var.name_prefix}: firma ES256 de los JWT de acceso (AD-08)"
   customer_master_key_spec = "ECC_NIST_P256"
   key_usage                = "SIGN_VERIFY"

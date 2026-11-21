@@ -41,6 +41,9 @@ step "Trivy (misconfiguración y secretos)"
 trivy config --quiet --ignorefile .trivyignore.yaml --exit-code 1 .
 trivy fs --quiet --scanners secret --exit-code 1 .
 
+step "Rutas de CloudFront y del ALB frente a los controladores reales"
+python3 -I scripts/verify-routes.py
+
 step "Exposición pública y patrones prohibidos"
 TF_FILES=$(find modules environments bootstrap -name '*.tf' -not -path '*/.terraform/*' | tr '\n' ' ')
 # Líneas de código sin comentarios.

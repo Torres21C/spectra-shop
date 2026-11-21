@@ -58,9 +58,9 @@ locals {
 # SPA en S3 privado
 # ---------------------------------------------------------------------------------------------------------
 resource "aws_s3_bucket" "spa" {
-  # checkov:skip=CKV_AWS_18:Registro de accesos del bucket no requerido: solo CloudFront (OAC) lee; WAF registra las peticiones.
-  # checkov:skip=CKV_AWS_144:Replicación entre regiones innecesaria: el contenido se reconstruye desde el repositorio (PR-6).
-  # checkov:skip=CKV2_AWS_62:Sin notificaciones de eventos: no hay consumidores.
+  # Nota (CKV_AWS_18, no evaluado como fallo por Checkov 3.4.6): Registro de accesos del bucket no requerido: solo CloudFront (OAC) lee; WAF registra las peticiones.
+  # Nota (CKV_AWS_144, no evaluado como fallo por Checkov 3.4.6): Replicación entre regiones innecesaria: el contenido se reconstruye desde el repositorio (PR-6).
+  # Nota (CKV2_AWS_62, no evaluado como fallo por Checkov 3.4.6): Sin notificaciones de eventos: no hay consumidores.
   bucket        = var.spa_bucket_name
   force_destroy = var.spa_bucket_force_destroy
 }
@@ -328,7 +328,7 @@ resource "aws_cloudfront_distribution" "this" {
   # checkov:skip=CKV_AWS_86:Registro estándar de CloudFront opcional; las peticiones se registran en los logs de WAF (con redacción de cookies y tokens).
   # checkov:skip=CKV_AWS_310:Sin failover de origen en el laboratorio (un solo ALB y un solo bucket).
   # checkov:skip=CKV_AWS_374:Sin restricción geográfica: laboratorio académico sin requisito de geobloqueo.
-  # checkov:skip=CKV2_AWS_42:Dominio propio opcional (decisión pendiente §18.5); sin él se usa el certificado de *.cloudfront.net.
+  # Nota (CKV2_AWS_42, no evaluado como fallo por Checkov 3.4.6): Dominio propio opcional (decisión pendiente §18.5); sin él se usa el certificado de *.cloudfront.net.
   # checkov:skip=CKV_AWS_174:Con el certificado por defecto de *.cloudfront.net no se puede fijar TLS 1.2 mínimo; con dominio propio se usa TLSv1.2_2021.
   enabled             = true
   comment             = "${var.name_prefix}: SPA y API bajo un mismo origen"

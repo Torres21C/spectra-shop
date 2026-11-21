@@ -92,8 +92,8 @@ resource "aws_db_instance" "this" {
   # checkov:skip=CKV_AWS_161:DT-09 usa roles PostgreSQL con contraseña por servicio; la autenticación IAM no está implementada en los servicios.
   # checkov:skip=CKV_AWS_118:Enhanced Monitoring desactivado por costo en el laboratorio; métricas básicas y alarmas en CloudWatch.
   # checkov:skip=CKV_AWS_353:Performance Insights desactivado por costo en el laboratorio.
-  # checkov:skip=CKV_AWS_354:Performance Insights desactivado (no hay datos que cifrar).
-  # checkov:skip=CKV2_AWS_30:El registro de sentencias está deshabilitado a propósito (ADR-AWS-01: ALTER ROLE transporta contraseñas).
+  # Nota (CKV_AWS_354, no evaluado como fallo por Checkov 3.4.6): Performance Insights desactivado (no hay datos que cifrar).
+  # Nota (CKV2_AWS_30, no evaluado como fallo por Checkov 3.4.6): El registro de sentencias está deshabilitado a propósito (ADR-AWS-01: ALTER ROLE transporta contraseñas).
   identifier = var.identifier
 
   engine                     = "postgres"
