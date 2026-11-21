@@ -131,3 +131,7 @@ infra/terraform/scripts/static-checks.sh
 ```
 
 No usa credenciales: `fmt`, `init -backend=false`, `validate`, `terraform test` con proveedores simulados (solo `plan`), TFLint, Checkov, Trivy (misconfiguración y secretos), la verificación de rutas frente a los controladores (`verify-routes.py`) y búsquedas de patrones prohibidos. Resultados: `../../docs/05-validacion-estatica.md`.
+
+- La CI ejecuta el mismo script en el workflow `iac` (`.github/workflows/iac.yml`), con las mismas versiones fijadas.
+- Checkov debe estar **completo**. La fórmula de Homebrew 3.4.6 no trae las comprobaciones de grafo; si el script lo detecta, usa la imagen oficial fijada (`scripts/ci/checkov-docker.sh`, requiere Docker) o falla.
+- Trivy usa las reglas incluidas en su binario (caché vacía), igual que en la CI.

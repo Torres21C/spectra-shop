@@ -10,7 +10,8 @@ Terraform del **laboratorio académico** en AWS: red privada, RDS PostgreSQL, EC
 ```text
 infra/terraform/
   .tflint.hcl  .trivyignore.yaml        configuración de la validación estática
-  scripts/static-checks.sh              validación completa sin credenciales AWS
+  scripts/static-checks.sh              validación completa sin credenciales AWS (local y CI)
+  scripts/ci/                           envoltorio de Terraform (bloquea apply/destroy) y Checkov fijado
   scripts/verify-routes.py              rutas de CloudFront/ALB frente a los controladores reales
   bootstrap/                            bucket S3 + KMS del state (se aplica aparte, una vez)
   modules/
@@ -44,4 +45,8 @@ Se partió de la estructura propuesta para PR-5 con dos ajustes:
 | [docs/04-riesgos-y-decisiones.md](docs/04-riesgos-y-decisiones.md)       | Registro de riesgos y decisiones            |
 | [docs/05-validacion-estatica.md](docs/05-validacion-estatica.md)         | Evidencias de la validación estática        |
 | [docs/06-prerrequisitos-pr6-pr7.md](docs/06-prerrequisitos-pr6-pr7.md)   | Prerrequisitos de PR-6 y PR-7               |
-| [docs/07-excepciones-checkov.md](docs/07-excepciones-checkov.md)         | Las 32 excepciones de Checkov, clasificadas |
+| [docs/07-excepciones-checkov.md](docs/07-excepciones-checkov.md)         | Las 57 excepciones de Checkov, clasificadas |
+
+## Validación en la CI
+
+El workflow [`iac`](../../.github/workflows/iac.yml) ejecuta `scripts/static-checks.sh` en cada PR y push a `main`, con herramientas fijadas y sin credenciales AWS ni OIDC. Detalle: [docs/05-validacion-estatica.md §8](docs/05-validacion-estatica.md#8-validación-de-iac-en-la-ci-job-iac).
