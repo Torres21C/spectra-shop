@@ -11,6 +11,7 @@ Terraform del **laboratorio académico** en AWS: red privada, RDS PostgreSQL, EC
 infra/terraform/
   .tflint.hcl  .trivyignore.yaml        configuración de la validación estática
   scripts/static-checks.sh              validación completa sin credenciales AWS
+  scripts/verify-routes.py              rutas de CloudFront/ALB frente a los controladores reales
   bootstrap/                            bucket S3 + KMS del state (se aplica aparte, una vez)
   modules/
     network/          VPC, subredes privadas por AZ ID, IGW sin rutas, gateway S3, Flow Logs
@@ -35,11 +36,12 @@ Se partió de la estructura propuesta para PR-5 con dos ajustes:
 
 ## Documentación
 
-| Documento                                                                | Contenido                                 |
-| ------------------------------------------------------------------------ | ----------------------------------------- |
-| [docs/01-arquitectura-y-recursos.md](docs/01-arquitectura-y-recursos.md) | Diagrama Mermaid y matriz de recursos AWS |
-| [docs/02-matriz-iam-y-red.md](docs/02-matriz-iam-y-red.md)               | Matriz IAM y de accesos de red            |
-| [docs/03-costos.md](docs/03-costos.md)                                   | Estimación desglosada (no verificada)     |
-| [docs/04-riesgos-y-decisiones.md](docs/04-riesgos-y-decisiones.md)       | Registro de riesgos y decisiones          |
-| [docs/05-validacion-estatica.md](docs/05-validacion-estatica.md)         | Evidencias de la validación estática      |
-| [docs/06-prerrequisitos-pr6-pr7.md](docs/06-prerrequisitos-pr6-pr7.md)   | Prerrequisitos de PR-6 y PR-7             |
+| Documento                                                                | Contenido                                   |
+| ------------------------------------------------------------------------ | ------------------------------------------- |
+| [docs/01-arquitectura-y-recursos.md](docs/01-arquitectura-y-recursos.md) | Diagrama Mermaid y matriz de recursos AWS   |
+| [docs/02-matriz-iam-y-red.md](docs/02-matriz-iam-y-red.md)               | Matriz IAM y de accesos de red              |
+| [docs/03-costos.md](docs/03-costos.md)                                   | Estimación desglosada (no verificada)       |
+| [docs/04-riesgos-y-decisiones.md](docs/04-riesgos-y-decisiones.md)       | Registro de riesgos y decisiones            |
+| [docs/05-validacion-estatica.md](docs/05-validacion-estatica.md)         | Evidencias de la validación estática        |
+| [docs/06-prerrequisitos-pr6-pr7.md](docs/06-prerrequisitos-pr6-pr7.md)   | Prerrequisitos de PR-6 y PR-7               |
+| [docs/07-excepciones-checkov.md](docs/07-excepciones-checkov.md)         | Las 32 excepciones de Checkov, clasificadas |

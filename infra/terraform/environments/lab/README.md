@@ -130,4 +130,4 @@ P10: con `TRUST_PROXY="false"`, registrar `X-Forwarded-For` y la IP del socket e
 infra/terraform/scripts/static-checks.sh
 ```
 
-No usa credenciales: `fmt`, `init -backend=false`, `validate`, `terraform test` con proveedores simulados (solo `plan`), TFLint, Checkov, Trivy (misconfiguración y secretos) y búsquedas de patrones prohibidos. Resultados: `../../docs/05-validacion-estatica.md`.
+No usa credenciales: `fmt`, `init -backend=false`, `validate`, `terraform test` con proveedores simulados (solo `plan`), TFLint, Checkov, Trivy (misconfiguración y secretos), la verificación de rutas frente a los controladores (`verify-routes.py`) y búsquedas de patrones prohibidos. Resultados: `../../docs/05-validacion-estatica.md`.
