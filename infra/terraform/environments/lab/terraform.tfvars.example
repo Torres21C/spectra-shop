@@ -1,0 +1,32 @@
+# Copie a terraform.tfvars (ignorado por Git). NO ponga aquí contraseñas, tokens ni claves: los secretos se
+# generan como valores efímeros y se escriben en Secrets Manager sin pasar por el state (README, «Secretos»).
+
+# SHA completo del commit de main publicado en ECR por PR-6 (runtime: <sha>; migración: <sha>-migrate).
+image_tag = "0000000000000000000000000000000000000000"
+
+# Arquitectura de las imágenes publicadas (AWS-09): X86_64 o ARM64.
+cpu_architecture = "X86_64"
+
+# Primer apply: 0. Tras db-provision → *-migrate → db-finalize (PR-7): 1.
+service_desired_count = 0
+
+# TRUST_PROXY: "false" hasta ejecutar la prueba P10 (ver README, «TRUST_PROXY»).
+trust_proxy = "false"
+
+# Primera fase: prefix_list. Tras crear el VPC origin, puede pasarse a vpc_origin_sg (más restrictivo).
+alb_ingress_source = "prefix_list"
+
+# Notificaciones (direcciones reales solo en terraform.tfvars, nunca en el repositorio).
+alarm_email   = "alertas@example.invalid"
+budget_emails = ["alertas@example.invalid"]
+
+# ADMIN sintético opcional (correo ficticio).
+# synthetic_admin_email = "admin@spectra.test"
+
+# Dominio propio opcional (ACM en us-east-1, ya validado).
+# domain_name         = "shop.example.invalid"
+# acm_certificate_arn = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+# route53_zone_id     = "Z0000000000000000000"
+
+# Rotación: incremente la versión del secreto y siga el procedimiento del README.
+# secret_versions = { "internal-token" = 2 }
