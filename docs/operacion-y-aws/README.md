@@ -2,14 +2,15 @@
 
 Documentación operativa de SPECTRA Shop sobre `main` = `2a27350` (MVP con M06/M07 mínimos), redactada el 2026-11-20. No modifica código, Dockerfiles, Compose ni `.env`, y no crea recursos AWS.
 
-| Documento                                                | Para qué sirve                                                                                                                 |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| [01-inventario-tecnico.md](01-inventario-tecnico.md)     | Estado verificado del repositorio: rutas reales, seguridad HTTP, datos, Compose, imágenes, CI y discrepancias detectadas       |
-| [02-guia-operacion-local.md](02-guia-operacion-local.md) | Levantar, operar, respaldar, probar y diagnosticar el stack local paso a paso                                                  |
-| [03-diagnostico-aws.md](03-diagnostico-aws.md)           | Hallazgos clasificados (bloqueante, necesario, recomendado, diferido) para desplegar en AWS                                    |
-| [04-plan-despliegue-aws.md](04-plan-despliegue-aws.md)   | **Propuesta** de arquitectura y procedimiento de laboratorio (ECS Fargate, RDS, CloudFront), costos, destrucción y plan por PR |
-| [05-publicacion-ecr.md](05-publicacion-ecr.md)           | Publicación manual de las 9 imágenes en ECR con OIDC (PR-6): Environment, protección de `main`, fallos seguros y excepciones   |
-| [postman/](postman/README.md)                            | Colecciones Postman v2.1 (por servicio y flujo E2E), entornos y guía de ejecución                                              |
+| Documento                                                          | Para qué sirve                                                                                                                 |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| [01-inventario-tecnico.md](01-inventario-tecnico.md)               | Estado verificado del repositorio: rutas reales, seguridad HTTP, datos, Compose, imágenes, CI y discrepancias detectadas       |
+| [02-guia-operacion-local.md](02-guia-operacion-local.md)           | Levantar, operar, respaldar, probar y diagnosticar el stack local paso a paso                                                  |
+| [03-diagnostico-aws.md](03-diagnostico-aws.md)                     | Hallazgos clasificados (bloqueante, necesario, recomendado, diferido) para desplegar en AWS                                    |
+| [04-plan-despliegue-aws.md](04-plan-despliegue-aws.md)             | **Propuesta** de arquitectura y procedimiento de laboratorio (ECS Fargate, RDS, CloudFront), costos, destrucción y plan por PR |
+| [05-publicacion-ecr.md](05-publicacion-ecr.md)                     | Publicación manual de las 9 imágenes en ECR con OIDC (PR-6): Environment, protección de `main`, fallos seguros y excepciones   |
+| [06-diagnostico-imagenes-base.md](06-diagnostico-imagenes-base.md) | Vulnerabilidades de las imágenes base que bloquean la primera publicación (R-PR6-10) y propuesta de PR-6.1                     |
+| [postman/](postman/README.md)                                      | Colecciones Postman v2.1 (por servicio y flujo E2E), entornos y guía de ejecución                                              |
 
 > [!WARNING]
 > Las suites de integración (`*-test`) y el flujo E2E de Postman **escriben y borran datos**. Ejecútelos solo en un proyecto Compose desechable (`docker compose -p spectra-aislado …`), nunca en el stack principal `spectra-shop`. Ver la [guía, sección 18](02-guia-operacion-local.md#18-ejecutar-pruebas-de-forma-segura).

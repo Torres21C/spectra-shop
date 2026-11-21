@@ -63,6 +63,25 @@ En _Settings → Environments → New environment_, o con la API como administra
 
 `verify` comprueba revisores, política de ramas y existencia; `publish`, las tres variables. Un Environment creado automáticamente por GitHub (sin protección) **no pasa** `verify`.
 
+### 3.4 Requisito de configuración OIDC de GitHub
+
+El rol confía en un `sub` exacto: `repo:Torres21C@84191196/spectra-shop@1457499804:environment:ecr-publish-lab`.
+
+- **Formato inmutable:** `OWNER@ID_PROPIETARIO/REPO@ID_REPOSITORIO`. GitHub lo aplica a este repositorio (`"use_immutable_subject": true`, `"use_default": true`).
+- **Comprobación previa, antes de cada `apply`:**
+
+  ```sh
+  gh api repos/Torres21C/spectra-shop/actions/oidc/customization/sub
+  # {"use_default":true,"use_immutable_subject":true,"sub_claim_prefix":"repo:Torres21C@84191196/spectra-shop@1457499804"}
+  ```
+
+- **Requisitos:**
+  - No cambiar la personalización OIDC del repositorio sin actualizar antes `github_oidc_subject_prefix` y aplicar.
+  - Si se añade una plantilla con `include_claim_keys` (p. ej. `job_workflow_ref`, la mejora de R-PR6-07), el `sub` cambia de forma. Primero se actualiza la confianza del rol y después la plantilla; si no, los tokens se rechazan (fallo seguro: no se publica).
+  - El nombre del Environment forma parte del `sub`. Si se renombra, hay que cambiar la variable `github_publish_environment` y el literal del workflow (`verify_workflows.py` lo exige).
+  - Transferir o renombrar el repositorio cambia los identificadores (R-PR6-09).
+- **El formato antiguo `repo:Torres21C/spectra-shop:…` no funciona** con este repositorio: la variable lo rechaza por validación.
+
 ### 3.3 Protección de `main` (recomendada; no aplicada en PR-6)
 
 _Settings → Rules → Rulesets → New branch ruleset_, objetivo `main`:
@@ -188,6 +207,20 @@ Con la política aprobada, **las imágenes actuales de `main` no se pueden publi
 3. Construir `db-ops` sobre `alpine` con `postgresql16-client` en lugar de la imagen del servidor.
 
 Después hay que repetir el ensayo con `publish = false`.
+
+### Contenido de los artefactos (repositorio público)
+
+Cualquier usuario autenticado en GitHub puede descargar los artefactos de un repositorio público durante su retención (7 días para `ecr-release-<sha>` y 90 para el manifiesto). Lo que contienen, revisado en el ensayo local del 2026-11-21:
+
+- **Imágenes OCI:** el mismo código y las mismas dependencias que ya son públicos en el repositorio.
+  - Variables de entorno: solo `PATH`, versiones de Node, Yarn y PostgreSQL, `NODE_ENV`, `CHECKPOINT_DISABLE` y `PGDATA`, sin valores sensibles.
+  - El historial de las imágenes no contiene secretos.
+  - Entre unos 140 000 archivos, ninguno es sensible (`.env`, `.npmrc`, claves, `.aws`, tfvars, state). El único `.pem` es el almacén de CA públicas de Alpine.
+- **Informes de Trivy y SBOM:** inventario de paquetes y CVE de las imágenes, información equivalente a la del repositorio.
+- **`images.json`, informes de política y manifiesto:** commit, etiquetas, digest y repositorio ECR. **El manifiesto incluye la cuenta de AWS** dentro de la URL del registro: no es un secreto, pero revela el identificador de la cuenta.
+- **No hay credenciales:** no hay claves estáticas y las temporales de OIDC no se escriben en archivos. Trivy busca secretos en cada imagen y bloquea si encuentra alguno.
+
+Riesgo aceptado como R-PR6-03. Si en el futuro las imágenes llegan a contener algo no público, se cambia a un registro intermedio privado.
 
 ## 8. Pruebas en AWS pendientes
 
