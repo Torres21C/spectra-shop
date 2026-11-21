@@ -46,6 +46,7 @@ data "aws_security_group" "cloudfront_vpc_origins" {
 }
 
 resource "aws_security_group" "alb" {
+  # checkov:skip=CKV2_AWS_5:Falso positivo: el SG se asocia al ALB en el módulo alb (variable alb_sg_id); el grafo de Checkov no sigue las referencias entre módulos.
   name        = "${var.name_prefix}-alb"
   description = "ALB interno: entrada solo desde CloudFront VPC origins"
   vpc_id      = var.vpc_id
@@ -54,6 +55,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_security_group" "service" {
+  # checkov:skip=CKV2_AWS_5:Falso positivo: cada SG se asocia a su servicio ECS en el módulo ecs (service_sg_ids); el grafo de Checkov no sigue las referencias entre módulos.
   for_each = toset(local.services)
 
   name        = "${var.name_prefix}-${each.key}"
@@ -64,6 +66,7 @@ resource "aws_security_group" "service" {
 }
 
 resource "aws_security_group" "ops" {
+  # checkov:skip=CKV2_AWS_5:Por diseño: el SG de las tareas DT-09 se usa al lanzarlas manualmente (salida run_task_network_configuration); ningún recurso de Terraform lo asocia.
   name        = "${var.name_prefix}-ops"
   description = "Tareas run-task de aprovisionamiento y migracion (DT-09)"
   vpc_id      = var.vpc_id
@@ -72,6 +75,7 @@ resource "aws_security_group" "ops" {
 }
 
 resource "aws_security_group" "rds" {
+  # checkov:skip=CKV2_AWS_5:Falso positivo: el SG se asocia a la instancia RDS en el módulo database (rds_sg_id); el grafo de Checkov no sigue las referencias entre módulos.
   name        = "${var.name_prefix}-rds"
   description = "RDS PostgreSQL: 5432 solo desde servicios y tareas de operacion"
   vpc_id      = var.vpc_id
@@ -80,6 +84,7 @@ resource "aws_security_group" "rds" {
 }
 
 resource "aws_security_group" "endpoints" {
+  # checkov:skip=CKV2_AWS_5:Falso positivo: el SG se asocia a los interface endpoints en el módulo endpoints (endpoints_sg_id); el grafo de Checkov no sigue las referencias entre módulos.
   name        = "${var.name_prefix}-vpce"
   description = "VPC interface endpoints: 443 solo desde servicios y tareas de operacion"
   vpc_id      = var.vpc_id

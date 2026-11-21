@@ -44,9 +44,9 @@ resource "aws_kms_alias" "state" {
 }
 
 resource "aws_s3_bucket" "state" {
-  # Nota (CKV_AWS_144, no evaluado como fallo por Checkov 3.4.6): Replicación entre regiones innecesaria para el laboratorio; el versionado protege frente a borrados.
-  # Nota (CKV2_AWS_62, no evaluado como fallo por Checkov 3.4.6): Sin notificaciones de eventos: no hay consumidores.
-  # Nota (CKV_AWS_18, no evaluado como fallo por Checkov 3.4.6): Registro de accesos del bucket opcional; CloudTrail registra las llamadas de gestión.
+  # checkov:skip=CKV_AWS_144:Replicación entre regiones innecesaria para el laboratorio; el versionado protege frente a borrados.
+  # checkov:skip=CKV2_AWS_62:Sin notificaciones de eventos: no hay consumidores.
+  # checkov:skip=CKV_AWS_18:Registro de accesos del bucket opcional; CloudTrail registra las llamadas de gestión.
   bucket = local.bucket_name
 
   lifecycle {

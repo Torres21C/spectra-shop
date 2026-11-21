@@ -47,6 +47,7 @@ locals {
 }
 
 resource "aws_lb" "this" {
+  # checkov:skip=CKV2_AWS_20:C5 desviación de laboratorio (ADR-AWS-05): ALB interno sin listener HTTPS al que redirigir; solo lo alcanza CloudFront por VPC origin y TLS termina en CloudFront.
   # checkov:skip=CKV_AWS_150:Laboratorio destruible con IaC; la protección se activa con la variable deletion_protection.
   # checkov:skip=CKV_AWS_91:Registros de acceso del ALB opcionales (variable access_logs_bucket); el borde ya registra en WAF con redacción.
   # Nota (CKV2_AWS_28, no evaluado como fallo por Checkov 3.4.6): El WAF está en CloudFront (único punto de entrada); el ALB es interno y solo admite CloudFront.
@@ -77,6 +78,7 @@ resource "aws_lb" "this" {
 }
 
 resource "aws_lb_target_group" "service" {
+  # checkov:skip=CKV_AWS_378:C5 desviación de laboratorio (ADR-AWS-05): HTTP dentro de la VPC entre el ALB interno y las tareas, con SG por servicio; TLS termina en CloudFront.
   for_each = local.services
 
   name                 = "${var.name}-${each.key}"
@@ -102,7 +104,7 @@ resource "aws_lb_target_group" "service" {
 
 resource "aws_lb_listener" "http" {
   # checkov:skip=CKV_AWS_2:C5 desviación de laboratorio (ADR-AWS-05): ALB interno solo alcanzable por CloudFront VPC origin; TLS termina en CloudFront.
-  # Nota (CKV_AWS_103, no evaluado como fallo por Checkov 3.4.6): C5 desviación de laboratorio (ADR-AWS-05): listener HTTP interno.
+  # checkov:skip=CKV_AWS_103:C5 desviación de laboratorio (ADR-AWS-05): listener HTTP interno.
   # Nota (CKV2_AWS_74, no evaluado como fallo por Checkov 3.4.6): C5 desviación de laboratorio (ADR-AWS-05): listener HTTP interno.
   load_balancer_arn = aws_lb.this.arn
   port              = 80

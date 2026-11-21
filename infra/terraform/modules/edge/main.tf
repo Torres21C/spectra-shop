@@ -58,9 +58,9 @@ locals {
 # SPA en S3 privado
 # ---------------------------------------------------------------------------------------------------------
 resource "aws_s3_bucket" "spa" {
-  # Nota (CKV_AWS_18, no evaluado como fallo por Checkov 3.4.6): Registro de accesos del bucket no requerido: solo CloudFront (OAC) lee; WAF registra las peticiones.
-  # Nota (CKV_AWS_144, no evaluado como fallo por Checkov 3.4.6): Replicación entre regiones innecesaria: el contenido se reconstruye desde el repositorio (PR-6).
-  # Nota (CKV2_AWS_62, no evaluado como fallo por Checkov 3.4.6): Sin notificaciones de eventos: no hay consumidores.
+  # checkov:skip=CKV_AWS_18:Registro de accesos del bucket no requerido: solo CloudFront (OAC) lee; WAF registra las peticiones.
+  # checkov:skip=CKV_AWS_144:Replicación entre regiones innecesaria: el contenido se reconstruye desde el repositorio (PR-6).
+  # checkov:skip=CKV2_AWS_62:Sin notificaciones de eventos: no hay consumidores.
   bucket        = var.spa_bucket_name
   force_destroy = var.spa_bucket_force_destroy
 }
@@ -325,6 +325,7 @@ resource "aws_cloudfront_response_headers_policy" "api" {
 # Distribución
 # ---------------------------------------------------------------------------------------------------------
 resource "aws_cloudfront_distribution" "this" {
+  # checkov:skip=CKV2_AWS_47:La protección Log4j está activa (AWSManagedRulesKnownBadInputsRuleSet, regla Log4JRCE). La comprobación exige además AWSManagedRulesAnonymousIpList, que bloquearía VPN y proveedores de nube: decisión pendiente del propietario.
   # checkov:skip=CKV_AWS_86:Registro estándar de CloudFront opcional; las peticiones se registran en los logs de WAF (con redacción de cookies y tokens).
   # checkov:skip=CKV_AWS_310:Sin failover de origen en el laboratorio (un solo ALB y un solo bucket).
   # checkov:skip=CKV_AWS_374:Sin restricción geográfica: laboratorio académico sin requisito de geobloqueo.

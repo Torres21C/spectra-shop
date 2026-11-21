@@ -32,8 +32,8 @@ jobs:
       TFLINT_SHA256: 22be11cadc25cd02401e94c0ccc91aa63467debb8485c2a755d98f4c0a9d1e2e
       TRIVY_VERSION: 0.76.2
       TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+      # Checkov se ejecuta con la imagen oficial fijada por digest en scripts/ci/checkov-docker.sh.
       CHECKOV_VERSION: 3.4.6
-      CHECKOV_IMAGE: bridgecrew/checkov@sha256:b4b7e9d419ddb9ae7a257678ee39cb5d9e5569f604723297dd9cec7fd4571bff
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: '0'
       CHECKPOINT_DISABLE: '1'
@@ -64,7 +64,6 @@ jobs:
           tar -xzf trivy.tar.gz -C "$tools/bin" trivy
           install -m 0755 "$GITHUB_WORKSPACE/infra/terraform/scripts/ci/terraform-guard.sh" "$tools/bin/terraform"
           install -m 0755 "$GITHUB_WORKSPACE/infra/terraform/scripts/ci/checkov-docker.sh" "$tools/bin/checkov"
-          docker pull --quiet "$CHECKOV_IMAGE"
           echo "$tools/bin" >> "$GITHUB_PATH"
           echo "TERRAFORM_REAL=$tools/real/terraform" >> "$GITHUB_ENV"
           echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tf-plugin-cache" >> "$GITHUB_ENV"

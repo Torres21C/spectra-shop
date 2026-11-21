@@ -48,7 +48,24 @@ done
 echo "TFLint sin hallazgos"
 
 step "Checkov"
-checkov -d . --framework terraform --quiet --compact --skip-download -o cli
+# Se exige un Checkov completo: la fórmula de Homebrew 3.4.6 no incluye las comprobaciones de grafo y daba
+# resultados verdes incompletos. Si el instalado no las trae, se usa la imagen fijada de la CI (Docker).
+checkov_complete() { [ "$($CHECKOV --list --framework terraform 2>/dev/null | grep -c 'CKV2_AWS_')" -ge 50 ]; }
+CHECKOV=${CHECKOV:-checkov}
+if ! checkov_complete; then
+  echo "Checkov '$CHECKOV' no incluye las comprobaciones de grafo; se usa la imagen fijada (scripts/ci/checkov-docker.sh)."
+  CHECKOV="sh $ROOT/scripts/ci/checkov-docker.sh"
+  checkov_complete || { echo "FAIL Checkov completo no disponible (se necesita Docker o un Checkov con CKV2_*)."; exit 1; }
+fi
+$CHECKOV --version
+# Un archivo que Checkov no puede analizar deja recursos sin evaluar: también es un fallo.
+CHECKOV_OUT=$(mktemp)
+checkov_rc=0
+$CHECKOV -d . --framework terraform --quiet --compact --skip-download -o cli > "$CHECKOV_OUT" 2>&1 || checkov_rc=$?
+cat "$CHECKOV_OUT"
+if grep -q 'Parsing errors' "$CHECKOV_OUT"; then echo "FAIL Checkov no pudo analizar algunos archivos"; checkov_rc=1; fi
+rm -f "$CHECKOV_OUT"
+[ "$checkov_rc" -eq 0 ] || exit "$checkov_rc"
 
 step "Trivy (misconfiguración y secretos)"
 # Caché vacía y --skip-check-update: se usan las reglas incluidas en el binario fijado, no un paquete de

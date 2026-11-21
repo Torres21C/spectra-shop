@@ -43,7 +43,7 @@ ephemeral "random_password" "db_role" {
 }
 
 resource "aws_secretsmanager_secret" "db_role" {
-  # Nota (CKV2_AWS_57, no evaluado como fallo por Checkov 3.4.6): Rotación manual controlada (versión write-only + db-provision); la rotación automática exigiría una Lambda en la VPC (fuera del alcance del laboratorio).
+  # checkov:skip=CKV2_AWS_57:Rotación manual controlada (versión write-only + db-provision); la rotación automática exigiría una Lambda en la VPC (fuera del alcance del laboratorio).
   for_each = local.db_roles
 
   name                    = "${var.secret_prefix}/db/${each.key}"
@@ -87,7 +87,7 @@ ephemeral "random_password" "token" {
 }
 
 resource "aws_secretsmanager_secret" "token" {
-  # Nota (CKV2_AWS_57, no evaluado como fallo por Checkov 3.4.6): Rotación manual controlada (versión write-only + redespliegue; SPECTRA_INTERNAL_TOKENS admite dos tokens durante el cambio).
+  # checkov:skip=CKV2_AWS_57:Rotación manual controlada (versión write-only + redespliegue; SPECTRA_INTERNAL_TOKENS admite dos tokens durante el cambio).
   for_each = toset(["internal-token", "inventory-token"])
 
   name                    = "${var.secret_prefix}/${each.key}"
@@ -116,7 +116,7 @@ ephemeral "random_password" "synthetic_admin" {
 }
 
 resource "aws_secretsmanager_secret" "synthetic_admin" {
-  # Nota (CKV2_AWS_57, no evaluado como fallo por Checkov 3.4.6): Credencial sintética de laboratorio; rotación manual por versión.
+  # checkov:skip=CKV2_AWS_57:Credencial sintética de laboratorio; rotación manual por versión.
   count = var.synthetic_admin_email == null ? 0 : 1
 
   name                    = "${var.secret_prefix}/synthetic-admin"
