@@ -1,0 +1,336 @@
+# PR-7A: paridad local de las restricciones de ejecución de ECS Fargate (proyecto Compose DESECHABLE).
+#
+# Se aplica SIEMPRE después de compose.yaml y de la emulación de RDS (maestro sin superusuario):
+#
+#   docker compose -p <proyecto-nuevo> --env-file <entorno-fuera-del-repo> \
+#     -f compose.yaml \
+#     -f infra/postgres/rds-emulation/compose.rds-emulation.yaml \
+#     -f infra/ecs-parity/compose.ecs-parity.yaml ...
+#
+# Lo orquesta scripts/ecs-parity/run-parity-tests.sh (genera credenciales, CA de prueba y clave KMS emulada fuera
+# del repositorio). Nunca usar con el stack principal `spectra-shop`.
+#
+# Fuente de verdad de cada valor: infra/terraform/modules/ecs/{main,workloads}.tf, modules/secrets/main.tf y
+# modules/database/main.tf. Equivalencias y diferencias aceptadas: infra/ecs-parity/README.md.
+#
+#   ECS (task definition)                         Aquí
+#   readonlyRootFilesystem = true (servicios)     read_only: true, sin volúmenes ni tmpfs (Fargate no admite tmpfs)
+#   readonlyRootFilesystem = false (operación)    read_only: false
+#   linuxParameters.initProcessEnabled = true     init: true
+#   linuxParameters.capabilities.drop = [ALL]     cap_drop: [ALL]
+#   (sin user en la task definition)              usuario de la imagen (node / postgres), sin `user:`
+#   cpu_architecture = X86_64                     platform: linux/amd64
+#   healthCheck 15 s / 5 s / 3 / 30 s             healthcheck con los mismos valores
+#   secretos DT-09: url con sslmode=require       mismas URL (sslmode=require&connection_limit=5)
+#   RDS: rds.force_ssl = 1 y parameter group      PostgreSQL 16 con ssl=on, hostnossl reject y los mismos log_*
+#   KMS (rol de tarea de identity)                emulador local-kms en la red interna, credenciales ficticias
+#   Cloud Map (identity.spectra.internal, …)      nombres de servicio de Compose
+
+services:
+  # ---------------------------------------------------------------------------------------------------------
+  # Amazon RDS emulado: TLS obligatorio (rds.force_ssl = 1) y los parámetros de registro del parameter group.
+  # No es una tarea ECS: no lleva las restricciones de contenedor.
+  # ---------------------------------------------------------------------------------------------------------
+  postgres:
+    image: postgres:16.6-alpine@sha256:1d04b9ba1d4996401f2552b51beda8187f175c0645c091e4781134fc9c9a3eef
+    pull_policy: never
+    volumes:
+      - ${SPECTRA_PARITY_TLS_DIR:?Define SPECTRA_PARITY_TLS_DIR}/server.crt:/parity-tls/server.crt:ro
+      - ${SPECTRA_PARITY_TLS_DIR:?Define SPECTRA_PARITY_TLS_DIR}/server.key:/parity-tls/server.key:ro
+    # La clave del servidor debe pertenecer a postgres con modo 600: se copia al arrancar (el montaje es de solo
+    # lectura). `local … trust` solo afecta al socket Unix dentro de este contenedor (inicialización y
+    # healthcheck); toda conexión TCP exige TLS y SCRAM, y la que no use TLS se rechaza.
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        install -d -o postgres -g postgres -m 0700 /etc/pgtls &&
+        install -o postgres -g postgres -m 0600 /parity-tls/server.key /etc/pgtls/server.key &&
+        install -o postgres -g postgres -m 0644 /parity-tls/server.crt /etc/pgtls/server.crt &&
+        printf 'local all all trust\nhostssl all all all scram-sha-256\nhostnossl all all all reject\n'
+        > /etc/pgtls/pg_hba.conf && chown postgres:postgres /etc/pgtls/pg_hba.conf &&
+        exec docker-entrypoint.sh "$$@"
+      - pg-tls
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - ssl_cert_file=/etc/pgtls/server.crt
+      - -c
+      - ssl_key_file=/etc/pgtls/server.key
+      - -c
+      - hba_file=/etc/pgtls/pg_hba.conf
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_duration_statement=-1
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+
+  # ---------------------------------------------------------------------------------------------------------
+  # AWS KMS emulado (solo red interna). Credenciales ficticias: nunca hay credenciales AWS reales.
+  # ---------------------------------------------------------------------------------------------------------
+  kms:
+    image: nsmithuk/local-kms:3.12.0@sha256:7c987f75e10d775630117293f86d09666169d0416e442244e55f816a002e0e77
+    pull_policy: never
+    environment:
+      KMS_REGION: us-east-1
+      KMS_ACCOUNT_ID: '111122223333'
+    networks: [backend]
+
+  # Crea la clave ECC_NIST_P256 de firma y su alias en el emulador e imprime el ARN y la clave pública (como
+  # `aws_kms_key.jwt` + `data.aws_kms_public_key` en Terraform). Usa el SDK de la propia imagen de identity.
+  kms-seed:
+    profiles: [parity-setup]
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX:?Define SPECTRA_PARITY_IMAGE_PREFIX}/identity-service-runtime:${SPECTRA_PARITY_IMAGE_TAG:?Define SPECTRA_PARITY_IMAGE_TAG}
+    pull_policy: never
+    platform: linux/amd64
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ENDPOINT_URL_KMS: http://kms:8080
+      AWS_ACCESS_KEY_ID: local-parity-only
+      AWS_SECRET_ACCESS_KEY: local-parity-only
+      SPECTRA_PARITY_KMS_ALIAS: alias/spectra-parity-jwt
+    volumes:
+      - ./scripts/ecs-parity/kms-seed.mjs:/app/parity/kms-seed.mjs:ro
+    command: ['node', '/app/parity/kms-seed.mjs']
+    depends_on:
+      kms:
+        condition: service_started
+    networks: [backend]
+
+  # ---------------------------------------------------------------------------------------------------------
+  # Tareas de operación (run-task): db-ops y las 4 imágenes `migrate`. En ECS: readonlyRootFilesystem = false,
+  # initProcessEnabled y drop ALL; PGSSLMODE = require; URL de los migradores con sslmode=require.
+  # ---------------------------------------------------------------------------------------------------------
+  postgres-provision:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/db-ops:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: false
+    init: true
+    cap_drop: [ALL]
+    environment:
+      PGPORT: '5432'
+      PGSSLMODE: require
+
+  postgres-finalize:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/db-ops:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: false
+    init: true
+    cap_drop: [ALL]
+    environment:
+      PGPORT: '5432'
+      PGSSLMODE: require
+
+  identity-migrate:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/identity-service-migrate:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: false
+    init: true
+    cap_drop: [ALL]
+    environment: !override
+      IDENTITY_DATABASE_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity&sslmode=require&connection_limit=5
+      SYNTHETIC_ADMIN_EMAIL: ${SYNTHETIC_ADMIN_EMAIL:-}
+      SYNTHETIC_ADMIN_PASSWORD: ${SYNTHETIC_ADMIN_PASSWORD:-}
+
+  catalog-migrate:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/catalog-service-migrate:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: false
+    init: true
+    cap_drop: [ALL]
+    environment: !override
+      DATABASE_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog&sslmode=require&connection_limit=5
+
+  commerce-migrate:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/commerce-service-migrate:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: false
+    init: true
+    cap_drop: [ALL]
+    environment: !override
+      COMMERCE_DATABASE_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce&sslmode=require&connection_limit=5
+
+  audit-migrate:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/audit-service-migrate:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: false
+    init: true
+    cap_drop: [ALL]
+    environment: !override
+      AUDIT_DATABASE_URL: postgresql://spectra_audit_migrator:${SPECTRA_AUDIT_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit&sslmode=require&connection_limit=5
+
+  # ---------------------------------------------------------------------------------------------------------
+  # Servicios: raíz de solo lectura, sin volúmenes, init y drop ALL. Entorno = task definition de
+  # modules/ecs/workloads.tf (variables + secretos). Solo identity añade el endpoint y credenciales ficticias del
+  # emulador de KMS (en ECS las credenciales llegan del rol de tarea).
+  # ---------------------------------------------------------------------------------------------------------
+  identity-service:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/identity-service-runtime:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    volumes: !reset []
+    ports: !override ['127.0.0.1:${SPECTRA_PARITY_IDENTITY_PORT:-43001}:3001']
+    environment: !override
+      COOKIE_SECURE: 'true'
+      CORS_ORIGINS: ${SPECTRA_PARITY_PUBLIC_ORIGIN:?Define SPECTRA_PARITY_PUBLIC_ORIGIN}
+      TRUST_PROXY: 'false'
+      PORT: '3001'
+      INTERNAL_PORT: '3101'
+      IDENTITY_ALLOW_EPHEMERAL_KEYS: 'false'
+      IDENTITY_JWT_SIGNER: kms
+      IDENTITY_KMS_KEY_ID: ${SPECTRA_PARITY_KMS_KEY_ARN:?Define SPECTRA_PARITY_KMS_KEY_ARN}
+      AWS_REGION: us-east-1
+      IDENTITY_DATABASE_URL: postgresql://spectra_identity_app:${SPECTRA_IDENTITY_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity&sslmode=require&connection_limit=5
+      SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS}
+      # Solo local (emulador de KMS):
+      AWS_ENDPOINT_URL_KMS: http://kms:8080
+      AWS_ACCESS_KEY_ID: local-parity-only
+      AWS_SECRET_ACCESS_KEY: local-parity-only
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      kms:
+        condition: service_started
+
+  catalog-service:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/catalog-service-runtime:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    volumes: !reset []
+    ports: !override ['127.0.0.1:${SPECTRA_PARITY_CATALOG_PORT:-43002}:3002']
+    environment: !override
+      COOKIE_SECURE: 'true'
+      CORS_ORIGINS: ${SPECTRA_PARITY_PUBLIC_ORIGIN}
+      TRUST_PROXY: 'false'
+      PORT: '3002'
+      INTERNAL_PORT: '3102'
+      IDENTITY_INTERNAL_URL: http://identity-service:3101
+      AUDIT_INTERNAL_URL: http://audit-service:3104
+      IDENTITY_PUBLIC_KEY_PEM: ${KMS_PUBLIC_KEY_PEM:?Exporte KMS_PUBLIC_KEY_PEM (clave pública de la clave KMS emulada)}
+      DATABASE_URL: postgresql://spectra_catalog_app:${SPECTRA_CATALOG_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog&sslmode=require&connection_limit=5
+      SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS}
+      SPECTRA_INTERNAL_TOKEN: ${SPECTRA_INTERNAL_TOKEN}
+      CATALOG_INVENTORY_TOKENS: ${CATALOG_INVENTORY_TOKENS}
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  commerce-service:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/commerce-service-runtime:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    volumes: !reset []
+    ports: !override ['127.0.0.1:${SPECTRA_PARITY_COMMERCE_PORT:-43003}:3003']
+    environment: !override
+      COOKIE_SECURE: 'true'
+      CORS_ORIGINS: ${SPECTRA_PARITY_PUBLIC_ORIGIN}
+      TRUST_PROXY: 'false'
+      PORT: '3003'
+      IDENTITY_INTERNAL_URL: http://identity-service:3101
+      CATALOG_INTERNAL_URL: http://catalog-service:3102
+      IDENTITY_PUBLIC_KEY_PEM: ${KMS_PUBLIC_KEY_PEM}
+      COMMERCE_DATABASE_URL: postgresql://spectra_commerce_app:${SPECTRA_COMMERCE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce&sslmode=require&connection_limit=5
+      SPECTRA_INTERNAL_TOKEN: ${SPECTRA_INTERNAL_TOKEN}
+      CATALOG_INVENTORY_TOKEN: ${CATALOG_INVENTORY_TOKEN}
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  audit-service:
+    image: ${SPECTRA_PARITY_IMAGE_PREFIX}/audit-service-runtime:${SPECTRA_PARITY_IMAGE_TAG}
+    build: !reset null
+    pull_policy: never
+    platform: linux/amd64
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    volumes: !reset []
+    ports: !override ['127.0.0.1:${SPECTRA_PARITY_AUDIT_PORT:-43004}:3004']
+    environment: !override
+      COOKIE_SECURE: 'true'
+      CORS_ORIGINS: ${SPECTRA_PARITY_PUBLIC_ORIGIN}
+      TRUST_PROXY: 'false'
+      PORT: '3004'
+      INTERNAL_PORT: '3104'
+      IDENTITY_INTERNAL_URL: http://identity-service:3101
+      IDENTITY_PUBLIC_KEY_PEM: ${KMS_PUBLIC_KEY_PEM}
+      AUDIT_DATABASE_URL: postgresql://spectra_audit_app:${SPECTRA_AUDIT_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit&sslmode=require&connection_limit=5
+      SPECTRA_INTERNAL_TOKEN: ${SPECTRA_INTERNAL_TOKEN}
+      SPECTRA_INTERNAL_TOKENS: ${SPECTRA_INTERNAL_TOKENS}
+    healthcheck:
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------------------------------------
+  # Verificación DT-09 (herramienta de prueba, no es una tarea ECS). La librería `pg` trata sslmode=require como
+  # verify-full, así que aquí se verifica el certificado contra la CA de prueba (más estricto que la aplicación).
+  # ---------------------------------------------------------------------------------------------------------
+  db-isolation-test:
+    volumes:
+      - ${SPECTRA_PARITY_TLS_DIR}/ca.crt:/parity-tls/ca.crt:ro
+    environment:
+      IDENTITY_APP_URL: postgresql://spectra_identity_app:${SPECTRA_IDENTITY_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      IDENTITY_MIGRATOR_URL: postgresql://spectra_identity_migrator:${SPECTRA_IDENTITY_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=identity&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      CATALOG_APP_URL: postgresql://spectra_catalog_app:${SPECTRA_CATALOG_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      CATALOG_MIGRATOR_URL: postgresql://spectra_catalog_migrator:${SPECTRA_CATALOG_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=catalog&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      COMMERCE_APP_URL: postgresql://spectra_commerce_app:${SPECTRA_COMMERCE_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      COMMERCE_MIGRATOR_URL: postgresql://spectra_commerce_migrator:${SPECTRA_COMMERCE_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=commerce&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      AUDIT_APP_URL: postgresql://spectra_audit_app:${SPECTRA_AUDIT_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+      AUDIT_MIGRATOR_URL: postgresql://spectra_audit_migrator:${SPECTRA_AUDIT_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=audit&sslmode=verify-full&sslrootcert=/parity-tls/ca.crt
+
+# Subredes explícitas: los rangos predefinidos de Docker están agotados en el equipo de desarrollo.
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${SPECTRA_PARITY_EDGE_SUBNET:-10.233.71.0/24}
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SPECTRA_PARITY_BACKEND_SUBNET:-10.233.72.0/24}
