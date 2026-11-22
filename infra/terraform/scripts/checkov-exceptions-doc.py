@@ -84,7 +84,7 @@ PENDING = {
     ("CKV_AWS_174", "module.edge.aws_cloudfront_distribution.this"): "Pendiente: resolver antes del despliegue (R-PR5-27)",
 }
 # Decisiones del propietario del 2026-11-22 (PR-6.2; ADR-AWS-05, D-AWS-05-18 a D-AWS-05-22).
-ACCEPTED_D6 = f"Aceptada: R-PR5-26 cubierto por CloudTrail, que no equivale al registro de accesos ({DATE_PR62}, D6)"
+ACCEPTED_D6 = f"Aceptada ({DATE_PR62}, D6): cubierta en el código por CloudTrail, que no equivale al registro de accesos; R-PR5-26 pendiente de evidencia en AWS"
 ACCEPTED_PR62 = f"Aceptada para el laboratorio ({DATE_PR62}, PR-6.2)"
 ACCEPTED_C5 = f"Aceptada temporalmente ({DATE}, ADR-AWS-05)"
 ACCEPTED_47 = f"Aceptada: no bloquear; evaluar en modo Count ({DATE}, R-PR5-25)"
@@ -208,7 +208,7 @@ def render(report: dict, items: list[dict]) -> str:
         f"## Decisiones del propietario ({DATE} y {DATE_PR62})",
         "",
         f"- **{accepted} excepciones aceptadas** para el laboratorio académico, incluidas las de la desviación C5 (aceptada temporalmente con ADR-AWS-05) y CKV2_AWS_47 (no bloquear VPN ni proveedores de nube; evaluar `AWSManagedRulesAnonymousIpList` en modo Count durante el laboratorio, sin añadirla todavía al WAF).",
-        "- **CKV_AWS_18 del bucket del state (R-PR5-26):** deja de estar pendiente. Se mantiene como excepción justificada (D6): los accesos a los objetos del state los registra el trail `spectra-tfstate-audit` con eventos de datos de CloudTrail. **No son controles idénticos:** CloudTrail registra la identidad IAM y la API, con entrega garantizada y validación de integridad, pero no reproduce el formato ni todos los campos del registro de accesos de S3.",
+        "- **CKV_AWS_18 del bucket del state (R-PR5-26):** deja de estar pendiente **como excepción**: se mantiene como excepción justificada (D6). **R-PR5-26 sigue pendiente de evidencia en AWS** (entrega real del trail tras un bootstrap autorizado). En el código, los accesos a los objetos del state los registra el trail `spectra-tfstate-audit` con eventos de datos de CloudTrail. **No son controles idénticos:** CloudTrail registra la identidad IAM y la API, con entrega garantizada y validación de integridad, pero no reproduce el formato ni todos los campos del registro de accesos de S3.",
         f"- **{origin['PR-6.2']} excepciones de PR-6.2** (bucket de auditoría y trail limitado al state), aceptadas con las decisiones D5, D6 y D8 del {DATE_PR62}.",
         f"- **{pending} pendiente**, que no bloquea el merge pero sí la ejecución:",
         "  - CKV_AWS_174 de CloudFront: **resolver antes del despliegue**; preferencia del propietario: dominio propio con TLS mínimo 1.2 si es viable (R-PR5-27).",
