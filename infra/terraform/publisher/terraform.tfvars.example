@@ -1,0 +1,11 @@
+# Copie a terraform.tfvars (ignorado por Git). Sin secretos: esta raíz no gestiona ninguno.
+
+# Con false (por defecto) solo se crean los 5 repositorios ECR. true crea además el rol publicador OIDC.
+enable_ecr_publisher = false
+
+# Si la cuenta YA tiene el proveedor OIDC de token.actions.githubusercontent.com (consulta de solo lectura:
+# aws iam list-open-id-connect-providers), use false: se lee por URL y se valida la audiencia, sin importarlo.
+create_github_oidc_provider = true
+
+# Comprobar antes de cada apply: gh api repos/Torres21C/spectra-shop/actions/oidc/customization/sub
+# github_oidc_subject_prefix = "repo:Torres21C@84191196/spectra-shop@1457499804"

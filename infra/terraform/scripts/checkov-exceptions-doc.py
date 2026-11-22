@@ -26,6 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATE = "2026-11-21"
+DATE_PR62 = "2026-11-22"
 
 # Excepciones preventivas: Checkov no las detecta (retención por variable, registros del ALB por bloque
 # dinámico), pero la configuración real sí se desvía. Revisadas con Checkov completo sin anotaciones.
@@ -44,6 +45,8 @@ CATEGORIES = [
     ("Decisión pendiente §18.5 (dominio propio)", "Sí"),
     ("Decisión del propietario (AnonymousIpList en WAF)", "Sí"),
     ("Desviación de laboratorio C5", "Sí"),
+    ("Decisión del propietario D6 (CloudTrail en lugar del registro de accesos)", "Sí"),
+    ("Decisión de diseño (auditoría del state limitada a su bucket, PR-6.2)", "Sí"),
     ("Falso positivo (política de clave KMS)", "No"),
     ("Falso positivo (prefix list de CloudFront)", "No"),
     ("Falso positivo (SG asociado en otro módulo)", "No"),
@@ -58,21 +61,31 @@ CATEGORY_BY_ID = {
     "CKV_AWS_174": CATEGORIES[4][0],
     "CKV2_AWS_47": CATEGORIES[5][0],
     **{i: CATEGORIES[6][0] for i in ("CKV_AWS_2", "CKV_AWS_103", "CKV_AWS_378", "CKV2_AWS_20")},
-    **{i: CATEGORIES[7][0] for i in ("CKV_AWS_109", "CKV_AWS_111", "CKV_AWS_356")},
-    "CKV_AWS_260": CATEGORIES[8][0],
-    "CKV2_AWS_5": CATEGORIES[9][0],
+    **{i: CATEGORIES[9][0] for i in ("CKV_AWS_109", "CKV_AWS_111", "CKV_AWS_356")},
+    "CKV_AWS_260": CATEGORIES[10][0],
+    "CKV2_AWS_5": CATEGORIES[11][0],
+    **{i: COST for i in ("CKV_AWS_252", "CKV2_AWS_10")},
+    "CKV_AWS_67": CATEGORIES[8][0],
 }
-CATEGORY_OVERRIDES = {("CKV2_AWS_5", "module.security_groups.aws_security_group.ops"): CATEGORIES[3][0]}
+CATEGORY_OVERRIDES = {
+    ("CKV2_AWS_5", "module.security_groups.aws_security_group.ops"): CATEGORIES[3][0],
+    ("CKV_AWS_18", "aws_s3_bucket.state"): CATEGORIES[7][0],
+    ("CKV_AWS_18", "aws_s3_bucket.audit"): CATEGORIES[8][0],
+}
 
 # Origen respecto de la primera versión de PR-5 (32 excepciones obtenidas con un Checkov incompleto).
 RESTORED_IDS = {"CKV2_AWS_57", "CKV2_AWS_62", "CKV_AWS_18", "CKV_AWS_144", "CKV_AWS_103"}
 NEW_IDS = {"CKV2_AWS_5", "CKV_AWS_378", "CKV2_AWS_20", "CKV2_AWS_47"}
+# Recursos añadidos en PR-6.2 (auditoría del state en el bootstrap).
+PR62_RESOURCES = {"aws_s3_bucket.audit", "aws_cloudtrail.state_audit"}
 
 # Decisiones del propietario del 2026-11-21 (ADR-AWS-05, «Aceptación del propietario»).
 PENDING = {
-    ("CKV_AWS_18", "aws_s3_bucket.state"): "Pendiente: corregir antes de ejecutar bootstrap (R-PR5-26)",
     ("CKV_AWS_174", "module.edge.aws_cloudfront_distribution.this"): "Pendiente: resolver antes del despliegue (R-PR5-27)",
 }
+# Decisiones del propietario del 2026-11-22 (PR-6.2; ADR-AWS-05, D-AWS-05-18 a D-AWS-05-22).
+ACCEPTED_D6 = f"Aceptada ({DATE_PR62}, D6): cubierta en el código por CloudTrail, que no equivale al registro de accesos; R-PR5-26 pendiente de evidencia en AWS"
+ACCEPTED_PR62 = f"Aceptada para el laboratorio ({DATE_PR62}, PR-6.2)"
 ACCEPTED_C5 = f"Aceptada temporalmente ({DATE}, ADR-AWS-05)"
 ACCEPTED_47 = f"Aceptada: no bloquear; evaluar en modo Count ({DATE}, R-PR5-25)"
 ACCEPTED = f"Aceptada para el laboratorio ({DATE})"
@@ -120,13 +133,20 @@ def rows(report: dict) -> list[dict]:
             status = NOT_REQUIRED
         elif (cid, res) in PENDING:
             status = PENDING[(cid, res)]
+        elif (cid, res) == ("CKV_AWS_18", "aws_s3_bucket.state"):
+            status = ACCEPTED_D6
+        elif res in PR62_RESOURCES:
+            status = ACCEPTED_PR62
         elif category == CATEGORIES[6][0]:
             status = ACCEPTED_C5
         elif cid == "CKV2_AWS_47":
             status = ACCEPTED_47
         else:
             status = ACCEPTED
-        origin = "Nueva (CI)" if cid in NEW_IDS else "Restaurada" if cid in RESTORED_IDS else "PR-5 inicial"
+        if res in PR62_RESOURCES:
+            origin = "PR-6.2"
+        else:
+            origin = "Nueva (CI)" if cid in NEW_IDS else "Restaurada" if cid in RESTORED_IDS else "PR-5 inicial"
         result.append({
             "id": cid + (" ◇" if (cid, res) in PREVENTIVE else ""),
             "resource": res,
@@ -171,7 +191,7 @@ def render(report: dict, items: list[dict]) -> str:
     pending = sum(n for k, n in status.items() if k.startswith("Pendiente"))
     origin = Counter(r["origin"] for r in items)
     lines = [
-        "# Excepciones de Checkov (PR-5)",
+        "# Excepciones de Checkov (PR-5 y PR-6.2)",
         "",
         "> [!NOTE]",
         "> Documento generado con `scripts/checkov-exceptions-doc.py` a partir de Checkov y de los comentarios `checkov:skip` del código. `scripts/static-checks.sh` (local y CI) comprueba que coincide con el código y que ninguna justificación está vacía. No se edita a mano.",
@@ -182,19 +202,21 @@ def render(report: dict, items: list[dict]) -> str:
         "  - **10 anotaciones restauradas** (11 excepciones; _Restaurada_) que `b62e968` había convertido en notas.",
         "  - **8 anotaciones nuevas** (14 excepciones; _Nueva (CI)_): CKV2_AWS_5, CKV_AWS_378, CKV2_AWS_20 y CKV2_AWS_47.",
         "  - Las otras 6 notas (CKV_AWS_354, CKV2_AWS_30, CKV_AWS_7, CKV2_AWS_28, CKV2_AWS_74 y CKV2_AWS_42) siguen sin fallar y se conservan como notas.",
+        f"- **PR-6.2 ({DATE_PR62}):** el análisis cubre tres raíces (`bootstrap`, `publisher` y `environments/lab`). Los repositorios ECR y el rol publicador pasan a `publisher` sin excepciones nuevas. La auditoría del state añade {origin['PR-6.2']} excepciones en `bootstrap/audit.tf` (_PR-6.2_), una por cada fallo real de Checkov completo sobre el código sin anotar: ninguna preventiva.",
         "- Las excepciones equivalentes de Trivy están en `infra/terraform/.trivyignore.yaml`.",
         "",
-        f"## Decisiones del propietario ({DATE})",
+        f"## Decisiones del propietario ({DATE} y {DATE_PR62})",
         "",
         f"- **{accepted} excepciones aceptadas** para el laboratorio académico, incluidas las de la desviación C5 (aceptada temporalmente con ADR-AWS-05) y CKV2_AWS_47 (no bloquear VPN ni proveedores de nube; evaluar `AWSManagedRulesAnonymousIpList` en modo Count durante el laboratorio, sin añadirla todavía al WAF).",
-        f"- **{pending} pendientes**, que no bloquean el merge pero sí la ejecución:",
-        "  - CKV_AWS_18 del bucket del state: **corregir antes de ejecutar `bootstrap`** (R-PR5-26).",
+        "- **CKV_AWS_18 del bucket del state (R-PR5-26):** deja de estar pendiente **como excepción**: se mantiene como excepción justificada (D6). **R-PR5-26 sigue pendiente de evidencia en AWS** (entrega real del trail tras un bootstrap autorizado). En el código, los accesos a los objetos del state los registra el trail `spectra-tfstate-audit` con eventos de datos de CloudTrail. **No son controles idénticos:** CloudTrail registra la identidad IAM y la API, con entrega garantizada y validación de integridad, pero no reproduce el formato ni todos los campos del registro de accesos de S3.",
+        f"- **{origin['PR-6.2']} excepciones de PR-6.2** (bucket de auditoría y trail limitado al state), aceptadas con las decisiones D5, D6 y D8 del {DATE_PR62}.",
+        f"- **{pending} pendiente**, que no bloquea el merge pero sí la ejecución:",
         "  - CKV_AWS_174 de CloudFront: **resolver antes del despliegue**; preferencia del propietario: dominio propio con TLS mínimo 1.2 si es viable (R-PR5-27).",
         f"- **{status[NOT_REQUIRED]} falsos positivos**, que no requieren aceptación.",
         "",
     ]
     lines += table(SUMMARY_HEADER, summary_rows(items))
-    lines += ["", f"Origen de las {len(items)} excepciones: {origin['PR-5 inicial']} de la primera versión de PR-5, {origin['Restaurada']} restauradas y {origin['Nueva (CI)']} nuevas.", ""]
+    lines += ["", f"Origen de las {len(items)} excepciones: {origin['PR-5 inicial']} de la primera versión de PR-5, {origin['Restaurada']} restauradas, {origin['Nueva (CI)']} nuevas de la CI de PR-5 y {origin['PR-6.2']} de PR-6.2.", ""]
     lines += table(DETAIL_HEADER, detail_rows(items))
     return "\n".join(lines) + "\n"
 

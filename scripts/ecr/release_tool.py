@@ -36,8 +36,9 @@ REPOSITORY_PREFIX = "spectra"
 SOURCE_REPOSITORY = "https://github.com/Torres21C/spectra-shop"
 BUILDKIT_IMAGE = "moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe"
 
-# Las 9 imágenes. Coinciden con local.repositories de infra/terraform/environments/lab y con las etiquetas que
-# consumen las task definitions (<sha> y <sha>-migrate); lo comprueba scripts/tests/test_images_config.py.
+# Las 9 imágenes. Coinciden con local.repositories de infra/terraform/publisher (que crea los repositorios) y de
+# environments/lab (que los lee), y con las etiquetas que consumen las task definitions (<sha> y <sha>-migrate);
+# lo comprueba scripts/tests/test_images_config.py.
 IMAGES = [
     *[
         {

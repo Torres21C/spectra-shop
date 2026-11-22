@@ -440,18 +440,6 @@ variable "catalog_seed_demo_products" {
   default     = true
 }
 
-variable "ecr_force_delete" {
-  description = "Permite destruir repositorios ECR con imágenes."
-  type        = bool
-  default     = false
-}
-
-variable "ecr_keep_images" {
-  description = "Imágenes etiquetadas conservadas por repositorio."
-  type        = number
-  default     = 20
-}
-
 variable "spa_bucket_force_destroy" {
   description = "Permite destruir el bucket de la SPA con objetos."
   type        = bool
@@ -507,38 +495,3 @@ variable "budget_emails" {
   type        = list(string)
   default     = []
 }
-
-# ---------------------------------------------------------------------------------------------------------
-# PR-6: publicación de imágenes en ECR desde GitHub Actions (OIDC). Ver ADR-AWS-06.
-# ---------------------------------------------------------------------------------------------------------
-
-variable "enable_ecr_publisher" {
-  description = "Crea el rol OIDC publicador de ECR. false hasta que el propietario autorice la publicación."
-  type        = bool
-  default     = false
-}
-
-variable "create_github_oidc_provider" {
-  description = "true: crea el proveedor OIDC de GitHub. false: reutiliza el de la cuenta (github_oidc_provider_arn). Comprobar antes con aws iam list-open-id-connect-providers."
-  type        = bool
-  default     = true
-}
-
-variable "github_oidc_provider_arn" {
-  description = "ARN del proveedor OIDC de GitHub ya existente (si create_github_oidc_provider = false)."
-  type        = string
-  default     = null
-}
-
-variable "github_oidc_subject_prefix" {
-  description = "Prefijo inmutable del claim sub de este repositorio (GET /repos/Torres21C/spectra-shop/actions/oidc/customization/sub)."
-  type        = string
-  default     = "repo:Torres21C@84191196/spectra-shop@1457499804"
-}
-
-variable "github_publish_environment" {
-  description = "GitHub Environment con aprobación humana y restringido a main desde el que se publica."
-  type        = string
-  default     = "ecr-publish-lab"
-}
-

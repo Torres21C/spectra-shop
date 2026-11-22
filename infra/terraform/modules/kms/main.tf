@@ -1,6 +1,7 @@
 # Claves KMS del laboratorio (plan §3):
-#   - data: CMK simétrica para RDS, secretos (incluido el del maestro gestionado por RDS), ECR, CloudWatch
-#     Logs y SNS. Rotación anual.
+#   - data: CMK simétrica para RDS, secretos (incluido el del maestro gestionado por RDS), CloudWatch Logs y
+#     SNS. Rotación anual. ECR no la usa desde PR-6.2: los repositorios están en infra/terraform/publisher y
+#     cifran con la clave administrada por AWS aws/ecr (D2, ADR-AWS-06 D-AWS-06-19).
 #   - jwt: clave asimétrica ECC_NIST_P256 / SIGN_VERIFY para firmar los JWT de acceso (AD-08,
 #     ADR-AWS-02). La clave privada nunca sale de KMS. KMS no rota claves asimétricas: la rotación es
 #     manual (ADR-AWS-02, «Rotación»).
@@ -65,7 +66,7 @@ data "aws_iam_policy_document" "data_key" {
 }
 
 resource "aws_kms_key" "data" {
-  description             = "${var.name_prefix}: RDS, Secrets Manager, ECR, CloudWatch Logs y SNS"
+  description             = "${var.name_prefix}: RDS, Secrets Manager, CloudWatch Logs y SNS"
   key_usage               = "ENCRYPT_DECRYPT"
   enable_key_rotation     = true
   rotation_period_in_days = 365

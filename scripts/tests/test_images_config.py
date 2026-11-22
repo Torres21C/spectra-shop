@@ -15,10 +15,12 @@ class ImagesConfigTests(unittest.TestCase):
         self.assertEqual(sum(1 for i in tool.IMAGES if i["kind"] == "migrate"), 4)
 
     def test_repositories_match_terraform(self):
-        main_tf = (ROOT / "infra/terraform/environments/lab/main.tf").read_text()
-        repos = re.search(r"repositories\s*=\s*\[([^\]]*)\]", main_tf).group(1)
-        terraform = {f"spectra/{r}" for r in re.findall(r'"([^"]+)"', repos)}
-        self.assertEqual({i["repository"] for i in tool.IMAGES}, terraform)
+        # PR-6.2: los crea infra/terraform/publisher y los lee environments/lab; deben coincidir en ambas raíces.
+        for root in ("infra/terraform/publisher", "infra/terraform/environments/lab"):
+            main_tf = (ROOT / root / "main.tf").read_text()
+            repos = re.search(r"repositories\s*=\s*\[([^\]]*)\]", main_tf).group(1)
+            terraform = {f"spectra/{r}" for r in re.findall(r'"([^"]+)"', repos)}
+            self.assertEqual({i["repository"] for i in tool.IMAGES}, terraform, root)
 
     def test_tag_suffixes_match_ecs_task_definitions(self):
         workloads = (ROOT / "infra/terraform/modules/ecs/workloads.tf").read_text()

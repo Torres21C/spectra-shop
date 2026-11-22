@@ -1,0 +1,15 @@
+# Copie a terraform.tfvars (ignorado por Git). Sin secretos.
+
+aws_region = "us-east-1"
+
+# Obligatorio (D7): el presupuesto de la cuenta se crea con el bootstrap, antes de cualquier recurso
+# facturable. Es un aviso por correo, no un tope de gasto.
+budget_emails = ["<correo-del-propietario>"]
+# budget_limit_usd         = 50
+# budget_alert_percentages = [50, 100]
+
+# Retención de los registros de acceso al state (D8, mínimo 365 días).
+# audit_log_retention_days = 365
+
+# Roles autorizados a leer y escribir el state (vacío = solo IAM de la cuenta).
+# state_admin_role_arns = ["arn:aws:iam::<cuenta>:role/<rol-de-administracion>"]

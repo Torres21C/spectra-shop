@@ -17,7 +17,7 @@ Región fija: `us-east-1` (AD-01; validada en `variables.tf`).
 
 ## 2. Estado remoto (una sola vez, con autorización)
 
-1. Aplicar `infra/terraform/bootstrap` (bucket S3 versionado y cifrado con KMS, solo TLS y `prevent_destroy`):
+1. Aplicar `infra/terraform/bootstrap` (bucket S3 versionado y cifrado con KMS, solo TLS y `prevent_destroy`; desde PR-6.2, también la auditoría de los accesos al state con CloudTrail y el presupuesto de la cuenta, que exige `budget_emails` en su `terraform.tfvars`):
 
    ```sh
    cd infra/terraform/bootstrap
@@ -26,7 +26,8 @@ Región fija: `us-east-1` (AD-01; validada en `variables.tf`).
 
    Su state es local y no contiene secretos. Guárdelo fuera del repositorio (p. ej. `~/.config/spectra-shop/tfstate-bootstrap/`, con modo 600) o mígrelo al propio bucket después.
 
-2. Copiar `backend.hcl.example` a `backend.hcl` (ignorado por Git) y completar `bucket` y `kms_key_id` con las salidas del bootstrap. El bloqueo usa `use_lockfile = true` (bloqueo nativo de S3, sin DynamoDB).
+2. **Aplicar `infra/terraform/publisher`** (PR-6.2): crea los 5 repositorios ECR que lee este entorno ([publisher/README.md](../../publisher/README.md)). Sin ellos, `plan` falla en `data "aws_ecr_repository"`.
+3. Copiar `backend.hcl.example` a `backend.hcl` (ignorado por Git) y completar `bucket` y `kms_key_id` con las salidas del bootstrap. El bloqueo usa `use_lockfile = true` (bloqueo nativo de S3, sin DynamoDB).
 
 ## 3. Ciclo de vida
 
@@ -80,7 +81,7 @@ PR-6 compila la SPA con `VITE_*_API_URL = $(terraform output -raw public_origin)
 ### 3.7 Destrucción controlada (con autorización)
 
 1. Decidir el snapshot final de RDS. Por defecto se crea `spectra-lab-db-final` (tiene costo de almacenamiento). Omitirlo (`db_skip_final_snapshot = true`) requiere autorización expresa. El nombre debe ser único: si ya existe uno de una destrucción anterior, cámbielo.
-2. `db_deletion_protection = false` y, si hay imágenes u objetos, `ecr_force_delete = true` y `spa_bucket_force_destroy = true`. Ejecutar `apply` y revisar el plan.
+2. `db_deletion_protection = false` y, si hay objetos, `spa_bucket_force_destroy = true`. Ejecutar `apply` y revisar el plan. Los repositorios ECR **no** se destruyen con este entorno: los administra `infra/terraform/publisher` (PR-6.2).
 3. `terraform destroy` y revisar la lista **antes** de confirmar. CloudFront tarda varios minutos en deshabilitarse.
 4. Quedan pendientes de borrado: los secretos (`secret_recovery_window_days`; durante la ventana sus nombres siguen reservados y recrear el laboratorio falla con conflicto de nombre) y las claves KMS (`kms_deletion_window_days`).
 5. Comprobar que no queda nada: `aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=spectra-shop` (también los tipos `cloudfront` y `wafv2`). Revisar Cost Explorer 24–48 h después.
@@ -136,15 +137,6 @@ No usa credenciales: `fmt`, `init -backend=false`, `validate`, `terraform test` 
 - Checkov debe estar **completo**. La fórmula de Homebrew 3.4.6 no trae las comprobaciones de grafo; si el script lo detecta, usa la imagen oficial fijada (`scripts/ci/checkov-docker.sh`, requiere Docker) o falla.
 - Trivy usa las reglas incluidas en su binario (caché vacía), igual que en la CI.
 
-## 7. Rol publicador de imágenes (PR-6, desactivado)
+## 7. Repositorios ECR y rol publicador (PR-6.2: fuera de este entorno)
 
-`enable_ecr_publisher = false` por defecto: no se crea nada. Para la primera publicación, con autorización (guía: `docs/operacion-y-aws/05-publicacion-ecr.md`, §3):
-
-```hcl
-enable_ecr_publisher = true
-# Si la cuenta ya tiene el proveedor OIDC de GitHub (aws iam list-open-id-connect-providers):
-# create_github_oidc_provider = false
-# github_oidc_provider_arn    = "arn:aws:iam::<cuenta>:oidc-provider/token.actions.githubusercontent.com"
-```
-
-`github_oidc_subject_prefix` contiene el prefijo inmutable del `sub` del repositorio (`gh api repos/Torres21C/spectra-shop/actions/oidc/customization/sub`) y `github_publish_environment` = `ecr-publish-lab`. La salida `ecr_publisher_role_arn` va en la variable `AWS_ECR_PUBLISHER_ROLE_ARN` del Environment (no es un secreto). Después de publicar, `image_tag` = SHA del commit publicado.
+Este entorno **no** crea repositorios ECR ni el rol publicador, y no tiene `enable_ecr_publisher`: un `apply` aquí crea el laboratorio completo (216 recursos), así que la publicación se habilita en su propia raíz, [`infra/terraform/publisher`](../../publisher/README.md), con su propio state (ADR-AWS-06, D-AWS-06-17). `lab` lee los 5 repositorios con `data "aws_ecr_repository"` por nombre (`spectra/<repositorio>`) y los bloques `removed` sacan `module.registry` y `module.ecr_publisher` de un state antiguo sin destruirlos. Después de publicar, `image_tag` = SHA del commit publicado.

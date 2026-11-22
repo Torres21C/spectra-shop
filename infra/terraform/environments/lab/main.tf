@@ -5,11 +5,15 @@
 #        │                    │
 #        ├─▶ database ◀───────┤
 #        ├─▶ secrets ◀── database (endpoint para las URL)
-#        ├─▶ registry
 #        └─▶ observability (log groups; alarmas ◀── alb, database)
 #   alb ◀── network, security_groups
 #   edge (S3 + OAC, VPC origin → alb, CloudFront, WAF) ◀── alb
 #   ecs (task definitions, roles, servicios) ◀── todo lo anterior; CORS_ORIGINS = dominio de edge
+#   ecs ◀── data "aws_ecr_repository" (repositorios de infra/terraform/publisher, solo lectura)
+#
+# PR-6.2 (ADR-AWS-06, D-AWS-06-17/18): los repositorios ECR y el rol OIDC publicador NO están en esta raíz.
+# Los administra infra/terraform/publisher con su propio state; aquí solo se leen por nombre. Orden:
+# bootstrap → publisher → lab. Sin los repositorios, el plan de lab falla en el data source.
 
 data "aws_caller_identity" "current" {}
 
@@ -20,7 +24,36 @@ locals {
   services = ["identity", "catalog", "commerce", "audit"]
   ops      = ["db-provision", "identity-migrate", "catalog-migrate", "commerce-migrate", "audit-migrate", "db-finalize"]
 
+  # Repositorios que consumen las task definitions. Los crea infra/terraform/publisher (mismos nombres).
   repositories = ["identity-service", "catalog-service", "commerce-service", "audit-service", "db-ops"]
+
+  repository_urls = { for name, repo in data.aws_ecr_repository.this : name => repo.repository_url }
+  repository_arns = { for name, repo in data.aws_ecr_repository.this : name => repo.arn }
+}
+
+# Solo lectura: lab no crea ni modifica repositorios ECR (los administra infra/terraform/publisher).
+data "aws_ecr_repository" "this" {
+  for_each = toset(local.repositories)
+
+  name = "spectra/${each.key}"
+}
+
+# PR-6.2: estos módulos se trasladaron a infra/terraform/publisher. Si un state de lab los contuviera, saldrían
+# del state SIN destruirse (los adopta publisher con bloques import). Sin state previo, no tienen efecto.
+removed {
+  from = module.registry
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = module.ecr_publisher
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 module "kms" {
@@ -104,29 +137,6 @@ module "secrets" {
   secret_versions       = var.secret_versions
 }
 
-module "registry" {
-  source = "../../modules/registry"
-
-  repository_prefix = "spectra"
-  repositories      = local.repositories
-  kms_key_arn       = module.kms.data_key_arn
-  force_delete      = var.ecr_force_delete
-  keep_images       = var.ecr_keep_images
-}
-
-# PR-6: rol publicador de imágenes para GitHub Actions (OIDC). Desactivado por defecto (enable_ecr_publisher).
-module "ecr_publisher" {
-  source = "../../modules/github_oidc_publisher"
-
-  enabled                    = var.enable_ecr_publisher
-  name_prefix                = local.name_prefix
-  create_oidc_provider       = var.create_github_oidc_provider
-  existing_oidc_provider_arn = var.github_oidc_provider_arn
-  oidc_subject_prefix        = var.github_oidc_subject_prefix
-  github_environment         = var.github_publish_environment
-  repository_arns            = module.registry.repository_arns
-}
-
 module "alb" {
   source = "../../modules/alb"
 
@@ -188,8 +198,8 @@ module "ecs" {
   service_sg_ids              = module.security_groups.service_sg_ids
   target_group_arns           = module.alb.target_group_arns
   service_discovery_namespace = "spectra.internal"
-  repository_urls             = module.registry.repository_urls
-  repository_arns             = module.registry.repository_arns
+  repository_urls             = local.repository_urls
+  repository_arns             = local.repository_arns
   image_tag                   = var.image_tag
   cpu_architecture            = var.cpu_architecture
   service_desired_count       = var.service_desired_count

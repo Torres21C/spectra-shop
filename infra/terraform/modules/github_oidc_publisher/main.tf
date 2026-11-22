@@ -7,9 +7,14 @@
 #   propia concesión sobre la CMK), sin ECS, IAM, Secrets Manager, S3 ni Terraform. El despliegue ECS será
 #   un rol distinto (fuera de PR-6).
 # - Desactivado por defecto (enabled = false): no se crea nada hasta que el propietario lo autorice.
+# - Proveedor OIDC (PR-6.2, D3): AWS admite uno solo por URL y cuenta. Si ya existe, no se importa ni se
+#   duplica: se lee por su URL y se exige que acepte la audiencia sts.amazonaws.com.
+# - Desde PR-6.2 solo lo usa la raíz infra/terraform/publisher (ADR-AWS-06, D-AWS-06-17).
 
 locals {
-  oidc_provider_arn = var.enabled ? (var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : var.existing_oidc_provider_arn) : null
+  github_oidc_url   = "https://token.actions.githubusercontent.com"
+  reuse_provider    = var.enabled && !var.create_oidc_provider
+  oidc_provider_arn = var.enabled ? (var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.existing[0].arn) : null
   oidc_subject      = "${var.oidc_subject_prefix}:environment:${var.github_environment}"
 
   publish_actions = [
@@ -63,9 +68,23 @@ locals {
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.enabled && var.create_oidc_provider ? 1 : 0
 
-  url            = "https://token.actions.githubusercontent.com"
+  url            = local.github_oidc_url
   client_id_list = ["sts.amazonaws.com"]
   # Sin thumbprint_list: AWS valida el certificado de GitHub con sus CA de confianza.
+}
+
+# Proveedor ya existente en la cuenta (create_oidc_provider = false): solo lectura, nunca se administra aquí.
+data "aws_iam_openid_connect_provider" "existing" {
+  count = local.reuse_provider ? 1 : 0
+
+  url = local.github_oidc_url
+
+  lifecycle {
+    postcondition {
+      condition     = contains(self.client_id_list, "sts.amazonaws.com")
+      error_message = "El proveedor OIDC de GitHub existente no acepta la audiencia sts.amazonaws.com: no se crea el rol."
+    }
+  }
 }
 
 resource "aws_iam_role" "publisher" {
@@ -76,13 +95,6 @@ resource "aws_iam_role" "publisher" {
   assume_role_policy   = local.trust_policy
   max_session_duration = 3600
   permissions_boundary = var.permissions_boundary_arn
-
-  lifecycle {
-    precondition {
-      condition     = var.create_oidc_provider || var.existing_oidc_provider_arn != null
-      error_message = "Con create_oidc_provider = false hay que indicar existing_oidc_provider_arn (no se duplica el proveedor de la cuenta)."
-    }
-  }
 }
 
 resource "aws_iam_role_policy" "publish" {
