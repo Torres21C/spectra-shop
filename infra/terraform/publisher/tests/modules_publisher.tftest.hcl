@@ -1,12 +1,22 @@
-# Rol OIDC publicador de ECR (PR-6, ADR-AWS-06). Proveedor AWS SIMULADO y solo `command = plan`: no se
-# contacta con AWS. Comprueba la política de confianza (aud y sub exactos), el mínimo privilegio y que el
-# módulo no crea nada mientras esté desactivado.
+# Rol OIDC publicador de ECR (PR-6, ADR-AWS-06; desde PR-6.2 en la raíz publisher). Proveedor AWS SIMULADO y
+# solo `command = plan`: no se contacta con AWS. Comprueba la política de confianza (aud y sub exactos), el
+# mínimo privilegio, que el módulo no crea nada mientras esté desactivado y, con un proveedor OIDC ya
+# existente (D3), que se lee por URL, no se duplica y se rechaza si no acepta la audiencia sts.amazonaws.com.
 
 mock_provider "aws" {
   mock_resource "aws_iam_openid_connect_provider" {
     override_during = plan
     defaults = {
       arn = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+    }
+  }
+
+  # Proveedor OIDC ya existente en la cuenta (D3): se lee por URL, nunca se importa.
+  mock_data "aws_iam_openid_connect_provider" {
+    defaults = {
+      arn            = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+      url            = "token.actions.githubusercontent.com"
+      client_id_list = ["sts.amazonaws.com"]
     }
   }
 
@@ -33,7 +43,7 @@ run "publisher_disabled_by_default" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   assert {
@@ -51,7 +61,7 @@ run "publisher_trust_is_exact" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -106,7 +116,7 @@ run "publisher_permissions_are_minimal" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -146,31 +156,7 @@ run "publisher_reuses_existing_provider" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
-  }
-
-  variables {
-    enabled                    = true
-    create_oidc_provider       = false
-    existing_oidc_provider_arn = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
-  }
-
-  assert {
-    condition     = length(aws_iam_openid_connect_provider.github) == 0
-    error_message = "No debe duplicar el proveedor OIDC existente."
-  }
-
-  assert {
-    condition     = jsondecode(aws_iam_role.publisher[0].assume_role_policy).Statement[0].Principal.Federated == var.existing_oidc_provider_arn
-    error_message = "Debe confiar en el proveedor existente."
-  }
-}
-
-run "publisher_requires_provider_arn_when_reusing" {
-  command = plan
-
-  module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -178,14 +164,72 @@ run "publisher_requires_provider_arn_when_reusing" {
     create_oidc_provider = false
   }
 
-  expect_failures = [aws_iam_role.publisher]
+  assert {
+    condition     = length(aws_iam_openid_connect_provider.github) == 0 && length(data.aws_iam_openid_connect_provider.existing) == 1
+    error_message = "D3: con un proveedor existente no se crea otro; se lee el de la cuenta."
+  }
+
+  assert {
+    condition     = data.aws_iam_openid_connect_provider.existing[0].url == "https://token.actions.githubusercontent.com"
+    error_message = "D3: el proveedor existente se busca por la URL de GitHub Actions."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.publisher[0].assume_role_policy).Statement[0].Principal.Federated == "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+    error_message = "Debe confiar en el proveedor existente leído por URL."
+  }
+
+  assert {
+    condition     = output.oidc_provider_managed == false
+    error_message = "El proveedor existente no lo administra este módulo."
+  }
+}
+
+run "publisher_rejects_existing_provider_without_sts_audience" {
+  command = plan
+
+  module {
+    source = "../modules/github_oidc_publisher"
+  }
+
+  variables {
+    enabled              = true
+    create_oidc_provider = false
+  }
+
+  override_data {
+    target = data.aws_iam_openid_connect_provider.existing
+    values = {
+      arn            = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com"
+      client_id_list = ["https://github.com/Torres21C"]
+    }
+  }
+
+  expect_failures = [data.aws_iam_openid_connect_provider.existing]
+}
+
+run "publisher_disabled_reads_nothing" {
+  command = plan
+
+  module {
+    source = "../modules/github_oidc_publisher"
+  }
+
+  variables {
+    create_oidc_provider = false
+  }
+
+  assert {
+    condition     = length(data.aws_iam_openid_connect_provider.existing) == 0 && length(aws_iam_role.publisher) == 0
+    error_message = "Desactivado, el módulo no lee ni crea nada."
+  }
 }
 
 run "publisher_rejects_legacy_subject_format" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -199,7 +243,7 @@ run "publisher_rejects_wildcard_subject" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -213,7 +257,7 @@ run "publisher_rejects_wildcard_environment" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -227,7 +271,7 @@ run "publisher_rejects_ref_context_instead_of_environment" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -241,7 +285,7 @@ run "publisher_rejects_wildcard_repository" {
   command = plan
 
   module {
-    source = "../../modules/github_oidc_publisher"
+    source = "../modules/github_oidc_publisher"
   }
 
   variables {
@@ -249,20 +293,4 @@ run "publisher_rejects_wildcard_repository" {
   }
 
   expect_failures = [var.repository_arns]
-}
-
-run "publisher_rejects_foreign_oidc_provider" {
-  command = plan
-
-  module {
-    source = "../../modules/github_oidc_publisher"
-  }
-
-  variables {
-    enabled                    = true
-    create_oidc_provider       = false
-    existing_oidc_provider_arn = "arn:aws:iam::111122223333:oidc-provider/accounts.google.com"
-  }
-
-  expect_failures = [var.existing_oidc_provider_arn]
 }

@@ -16,9 +16,28 @@ misconfigurations:
     paths:
       - 'modules/edge/main.tf'
       - 'bootstrap/main.tf'
+      - 'bootstrap/audit.tf'
     statement: >-
       Sin registro de accesos de S3: la SPA solo la lee CloudFront (OAC) y las peticiones quedan en los logs
-      de WAF; el bucket del state lo auditan CloudTrail (gestión) y el versionado.
+      de WAF. Bucket del state (D6, PR-6.2): sus objetos los audita el trail spectra-tfstate-audit con eventos
+      de datos de CloudTrail, que no equivalen al registro de accesos de S3 (registran la identidad IAM y la
+      API, no el mismo formato ni todos los campos). Bucket de auditoría: registrar sus propios accesos
+      exigiría otro bucket de registros; lo protegen su política (solo el trail escribe, nadie borra versiones)
+      y el historial de eventos de gestión.
+  - id: AWS-0014
+    paths:
+      - 'bootstrap/audit.tf'
+    statement: >-
+      Trail limitado a propósito a los eventos de datos del bucket del state (R-PR5-26), que está en us-east-1;
+      los eventos de datos son regionales. No sustituye a un trail de cuenta multirregión (fuera del alcance
+      del laboratorio). Igual que CKV_AWS_67 en Checkov.
+  - id: AWS-0162
+    paths:
+      - 'bootstrap/audit.tf'
+    statement: >-
+      Sin envío a CloudWatch Logs por costo y alcance del laboratorio: los registros quedan en S3 con
+      validación de integridad. Sin alarmas en tiempo real sobre los accesos al state (riesgo residual).
+      Igual que CKV2_AWS_10 en Checkov.
   - id: AWS-0010
     paths:
       - 'modules/edge/main.tf'

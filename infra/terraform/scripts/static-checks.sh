@@ -6,7 +6,9 @@
 #   - garantías de la CI: pruebas solo con plan y proveedores simulados, envoltorio de Terraform de la CI
 #     (scripts/ci/terraform-guard.sh) que bloquea apply/destroy, y política de workflows: sin credenciales AWS
 #     estáticas ni despliegues, y OIDC solo en el job publish de ecr-publish.yml (PR-6, ADR-AWS-06);
-#   - pruebas del pipeline de publicación en ECR (scripts/tests, sin AWS).
+#   - pruebas del pipeline de publicación en ECR (scripts/tests, sin AWS);
+#   - PR-6.2: tres raíces (bootstrap, publisher, environments/lab) y propiedad exclusiva de sus recursos
+#     (scripts/check_state_ownership.py): publisher solo ECR y el rol OIDC; ningún recurso en dos states.
 # La CI (.github/workflows/iac.yml) ejecuta este mismo script con las mismas versiones de las herramientas.
 # Uso: infra/terraform/scripts/static-checks.sh   (desde cualquier directorio)
 set -eu
@@ -34,17 +36,23 @@ check() { # descripción, comando (debe devolver 0 si NO hay coincidencias prohi
 step "terraform fmt -check -recursive"
 terraform fmt -check -recursive
 
-for dir in environments/lab bootstrap; do
+ROOT_DIRS="bootstrap publisher environments/lab"
+for dir in $ROOT_DIRS; do
   step "terraform init -backend=false / validate ($dir)"
   terraform -chdir="$dir" init -backend=false -input=false -no-color >/dev/null
   terraform -chdir="$dir" validate -no-color
 done
 
-step "terraform test (proveedores simulados, solo plan)"
-terraform -chdir=environments/lab test -no-color
+for dir in $ROOT_DIRS; do
+  step "terraform test ($dir; proveedores simulados, solo plan)"
+  terraform -chdir="$dir" test -no-color
+done
+
+step "Propiedad de los recursos entre raíces (publisher solo ECR y OIDC; ningún recurso en dos states)"
+python3 -I scripts/check_state_ownership.py
 
 step "TFLint"
-for dir in environments/lab bootstrap modules/*; do
+for dir in $ROOT_DIRS modules/*; do
   tflint --chdir="$dir" --config="$ROOT/.tflint.hcl" --format=compact
 done
 echo "TFLint sin hallazgos"
@@ -99,7 +107,7 @@ step "Pruebas del pipeline de publicación en ECR y de la política de workflows
 python3 -I -m unittest discover -s "$REPO_ROOT/scripts/tests" -t "$REPO_ROOT" -p 'test_*.py'
 
 step "Exposición pública y patrones prohibidos"
-TF_FILES=$(find modules environments bootstrap -name '*.tf' -not -path '*/.terraform/*' | tr '\n' ' ')
+TF_FILES=$(find modules environments bootstrap publisher -name '*.tf' -not -path '*/.terraform/*' | tr '\n' ' ')
 # Líneas de código sin comentarios.
 code() { grep -hv '^[[:space:]]*#' $TF_FILES; }
 check "sin rutas (aws_route, route {}, NAT) en las tablas de rutas" "! code | grep -Eq 'resource \"aws_route\"|^[[:space:]]+route[[:space:]]*\\{|aws_nat_gateway|gateway_id[[:space:]]*='"
@@ -112,10 +120,10 @@ check "secretos solo por atributos write-only (sin secret_string, master_passwor
 check "sin credenciales estáticas de AWS" "! grep -REq 'AKIA[0-9A-Z]{16}|aws_secret_access_key|access_key[[:space:]]*=' $TF_FILES"
 check "sin permisos administrativos (Action \"*\" o AdministratorAccess)" "! code | grep -Eq 'AdministratorAccess|actions[[:space:]]*=[[:space:]]*\\[\"\\*\"\\]|\"iam:\\*\"'"
 check "sin ECS Exec" "! code | grep -Eq 'enable_execute_command[[:space:]]*=[[:space:]]*true'"
-TEST_FILES=$(find environments -name '*.tftest.hcl' -not -path '*/.terraform/*' | tr '\n' ' ')
+TEST_FILES=$(find environments bootstrap publisher -name '*.tftest.hcl' -not -path '*/.terraform/*' | tr '\n' ' ')
 check "pruebas solo con command = plan y proveedor AWS simulado" "tests_only_plan"
 check "workflows sin credenciales AWS estáticas, despliegues, migraciones ni Terraform apply/destroy" "! grep -Eq 'AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|aws-access-key-id|aws-secret-access-key|secrets\\.AWS|terraform[^#]*[[:space:]](apply|destroy)([[:space:]]|$)|run-task|update-service|register-task-definition|prisma[[:space:]]+migrate' \"$REPO_ROOT\"/.github/workflows/*.yml"
 check "OIDC (id-token: write, aws-actions, role-to-assume) solo en ecr-publish.yml" "! grep -lE 'id-token:[[:space:]]*write|aws-actions/|role-to-assume' \"$REPO_ROOT\"/.github/workflows/*.yml | grep -vq '/ecr-publish.yml$'"
-check "sin state, planes ni tfvars reales en el árbol" "! find . -path ./environments/lab/.terraform -prune -o -path ./bootstrap/.terraform -prune -o \\( -name '*.tfstate*' -o -name '*.tfplan' -o -name 'terraform.tfvars' -o -name 'backend.hcl' \\) -print | grep -q ."
+check "sin state, planes ni tfvars reales en el árbol" "! find . -path ./environments/lab/.terraform -prune -o -path ./bootstrap/.terraform -prune -o -path ./publisher/.terraform -prune -o \\( -name '*.tfstate*' -o -name '*.tfplan' -o -name 'terraform.tfvars' -o -name 'backend.hcl' \\) -print | grep -q ."
 
 [ "$fail" -eq 0 ] && printf '\nTodas las validaciones estáticas superadas.\n' || { printf '\nHay validaciones fallidas.\n'; exit 1; }

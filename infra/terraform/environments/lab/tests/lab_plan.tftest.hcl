@@ -15,6 +15,14 @@ mock_provider "aws" {
     }
   }
 
+  # PR-6.2: lab solo LEE los repositorios ECR de infra/terraform/publisher.
+  mock_data "aws_ecr_repository" {
+    defaults = {
+      arn            = "arn:aws:ecr:us-east-1:111122223333:repository/spectra/mock"
+      repository_url = "111122223333.dkr.ecr.us-east-1.amazonaws.com/spectra/mock"
+    }
+  }
+
   mock_data "aws_kms_public_key" {
     defaults = {
       public_key_pem = "-----BEGIN PUBLIC KEY-----\nMOCK\n-----END PUBLIC KEY-----\n"
@@ -55,13 +63,18 @@ run "plan_with_defaults" {
   }
 
   assert {
-    condition     = output.ecr_publisher_role_arn == null && length(module.ecr_publisher.oidc_provider_arn == null ? [] : [1]) == 0
-    error_message = "PR-6: el rol publicador OIDC y el proveedor deben estar desactivados por defecto."
+    condition     = keys(data.aws_ecr_repository.this) == ["audit-service", "catalog-service", "commerce-service", "db-ops", "identity-service"]
+    error_message = "PR-6.2: lab lee exactamente los 5 repositorios de infra/terraform/publisher."
   }
 
   assert {
-    condition     = output.ecr_publisher_oidc_subject == "repo:Torres21C@84191196/spectra-shop@1457499804:environment:ecr-publish-lab"
-    error_message = "PR-6: el sub aceptado debe ser el del Environment ecr-publish-lab de este repositorio (formato inmutable)."
+    condition     = alltrue([for name, repo in data.aws_ecr_repository.this : repo.name == "spectra/${name}"])
+    error_message = "PR-6.2: los repositorios se leen por su nombre spectra/<repositorio>, el mismo que crea publisher."
+  }
+
+  assert {
+    condition     = length(output.ecr_repository_urls) == 5
+    error_message = "PR-6.2: las task definitions usan las URL de los repositorios leídos."
   }
 }
 

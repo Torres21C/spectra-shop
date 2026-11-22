@@ -21,7 +21,7 @@ expect() { # esperado (permitido|bloqueado), argumentos...
   if [ "$got" = "$want" ]; then printf 'OK   %-10s terraform %s\n' "$want" "$*"; else printf 'FAIL %-10s terraform %s (obtenido: %s)\n' "$want" "$*" "$got"; fail=1; fi
 }
 
-for args in "apply" "apply -auto-approve" "-chdir=environments/lab apply -auto-approve" "destroy" "-chdir=bootstrap destroy -auto-approve" \
+for args in "apply" "apply -auto-approve" "-chdir=environments/lab apply -auto-approve" "destroy" "-chdir=bootstrap destroy -auto-approve" "-chdir=publisher apply -auto-approve" \
   "plan" "-chdir=environments/lab plan -out=tfplan" "import aws_s3_bucket.x b" "state list" "state rm x" "refresh" "taint x" \
   "untaint x" "workspace new x" "force-unlock 1" "output" "console" "login" "show" "graph" "providers lock" "get" \
   "init" "-chdir=environments/lab init -input=false" "init -backend-config=backend.hcl" "-chdir=environments/lab" ""; do
@@ -29,7 +29,9 @@ for args in "apply" "apply -auto-approve" "-chdir=environments/lab apply -auto-a
   expect bloqueado $args
 done
 for args in "fmt -check -recursive" "-chdir=environments/lab init -backend=false -input=false -no-color" \
-  "-chdir=environments/lab validate -no-color" "-chdir=environments/lab test -no-color" "version" "-version"; do
+  "-chdir=environments/lab validate -no-color" "-chdir=environments/lab test -no-color" \
+  "-chdir=publisher init -backend=false -input=false -no-color" "-chdir=publisher test -no-color" \
+  "-chdir=bootstrap test -no-color" "version" "-version"; do
   # shellcheck disable=SC2086
   expect permitido $args
 done

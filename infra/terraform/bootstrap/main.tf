@@ -1,14 +1,23 @@
 # Bootstrap del estado remoto de Terraform (ADR-AWS-05 D-AWS-05-11). Se aplica UNA vez, por separado y con
-# autorización, antes del entorno lab. Su propio state es local y pequeño (no contiene secretos): guárdelo
-# fuera del repositorio o mígrelo al bucket creado (README, «Estado remoto»).
+# autorización, antes de infra/terraform/publisher y de environments/lab. Su propio state es local y pequeño
+# (no contiene secretos): guárdelo fuera del repositorio o mígrelo al bucket creado (README, «Estado remoto»).
 #
 # Controles: bucket privado (Block Public Access y BucketOwnerEnforced), versionado, SSE-KMS con clave propia
 # y rotación, solo TLS, bloqueo nativo de S3 (`use_lockfile`) y protección contra destrucción accidental.
+# PR-6.2: auditoría de los accesos al state con CloudTrail (audit.tf, R-PR5-26) y presupuesto de la cuenta
+# antes del primer recurso facturable (budget.tf, D7).
 
 data "aws_caller_identity" "current" {}
 
 locals {
-  bucket_name = "spectra-tfstate-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+  account_id  = data.aws_caller_identity.current.account_id
+  bucket_name = "spectra-tfstate-${local.account_id}-${var.aws_region}"
+
+  # El ARN del trail se construye como texto (no como referencia a aws_cloudtrail.state_audit): la política
+  # de la clave y la del bucket de auditoría lo necesitan ANTES de que exista el trail, y una referencia
+  # crearía un ciclo clave → trail → clave.
+  audit_trail_name = "spectra-tfstate-audit"
+  audit_trail_arn  = "arn:aws:cloudtrail:${var.aws_region}:${local.account_id}:trail/${local.audit_trail_name}"
 }
 
 data "aws_iam_policy_document" "state_key" {
@@ -22,7 +31,49 @@ data "aws_iam_policy_document" "state_key" {
 
     principals {
       type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+      identifiers = ["arn:aws:iam::${local.account_id}:root"]
+    }
+  }
+
+  # PR-6.2 (D5): CloudTrail cifra con esta clave los registros de acceso al state. Solo el trail de auditoría
+  # del state (aws:SourceArn) y solo con su contexto de cifrado; sin Decrypt (lo leen principales de IAM).
+  statement {
+    sid       = "AllowStateAuditTrailToEncryptLogs"
+    actions   = ["kms:GenerateDataKey*"]
+    resources = ["*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceArn"
+      values   = [local.audit_trail_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:cloudtrail:arn"
+      values   = [local.audit_trail_arn]
+    }
+  }
+
+  statement {
+    sid       = "AllowStateAuditTrailToDescribeKey"
+    actions   = ["kms:DescribeKey"]
+    resources = ["*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudtrail.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceArn"
+      values   = [local.audit_trail_arn]
     }
   }
 }
@@ -46,7 +97,7 @@ resource "aws_kms_alias" "state" {
 resource "aws_s3_bucket" "state" {
   # checkov:skip=CKV_AWS_144:Replicación entre regiones innecesaria para el laboratorio; el versionado protege frente a borrados.
   # checkov:skip=CKV2_AWS_62:Sin notificaciones de eventos: no hay consumidores.
-  # checkov:skip=CKV_AWS_18:PENDIENTE antes de ejecutar bootstrap (R-PR5-26): sin registro de accesos ni eventos de datos de CloudTrail, las lecturas y escrituras del state no quedan auditadas (el historial de eventos solo cubre operaciones de gestión).
+  # checkov:skip=CKV_AWS_18:Sin server access logging (D6, PR-6.2). Los accesos a los objetos del state los audita el trail spectra-tfstate-audit con eventos de datos de CloudTrail (audit.tf, R-PR5-26). No son controles idénticos: CloudTrail registra la identidad IAM y la API, con entrega garantizada y validación de integridad, pero no reproduce el formato ni todos los campos del registro de accesos de S3.
   bucket = local.bucket_name
 
   lifecycle {

@@ -10,20 +10,9 @@ variable "name_prefix" {
 }
 
 variable "create_oidc_provider" {
-  description = "true: crea el proveedor OIDC de GitHub de la cuenta. false: reutiliza el existente (existing_oidc_provider_arn). AWS solo admite uno por URL y cuenta."
+  description = "true: crea el proveedor OIDC de GitHub de la cuenta. false: usa el ya existente, leído por su URL (data source) y validado (audiencia sts.amazonaws.com); no lo importa ni lo administra. AWS solo admite uno por URL y cuenta."
   type        = bool
   default     = true
-}
-
-variable "existing_oidc_provider_arn" {
-  description = "ARN del proveedor OIDC de token.actions.githubusercontent.com ya existente en la cuenta (cuando create_oidc_provider = false)."
-  type        = string
-  default     = null
-
-  validation {
-    condition     = var.existing_oidc_provider_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$", var.existing_oidc_provider_arn))
-    error_message = "existing_oidc_provider_arn debe ser el proveedor OIDC de token.actions.githubusercontent.com."
-  }
 }
 
 variable "oidc_subject_prefix" {
