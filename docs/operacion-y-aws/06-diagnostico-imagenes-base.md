@@ -243,7 +243,7 @@ Conclusiones:
 
 ## 7. Resultado de la remediación (PR-6.1, 2026-11-21, local)
 
-Rama `feature/aws-pr6-1-base-images` (commit local `e5d87be`, sin push). Antes = imágenes de `main` (bases actuales); después = PR-6.1. Las 9 imágenes `linux/amd64` construidas con `scripts/ecr/build-images.sh` y analizadas con `scripts/ecr/scan-images.sh` (Trivy 0.76.2), **con la política sin cambios y sin excepciones**.
+Rama `feature/aws-pr6-1-base-images` (commit `e5d87be`, PR #19). Antes = imágenes de `main` (bases actuales); después = PR-6.1. Las 9 imágenes `linux/amd64` construidas con `scripts/ecr/build-images.sh` y analizadas con `scripts/ecr/scan-images.sh` (Trivy 0.76.2), **con la política sin cambios y sin excepciones**.
 
 | Imagen                     | Base antes → después                                                                                   | Digest después         | Tamaño antes → después | CRITICAL  | HIGH       | Paquetes eliminados                                 | Arranque o migración                             | Trivy y SBOM                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------- | ---------------------- | --------- | ---------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------ |
@@ -273,7 +273,14 @@ Validaciones (evidencia `EV-AWS-PR61-BASE-IMAGES-LOCAL-20261121` en la bóveda):
 | Integridad (`release_tool.py verify-release`)                                                                                          | 9 imágenes íntegras, del commit analizado, con la política aprobada: los digest no cambiaron después del análisis                                                                                                                                                                     |
 | `static-checks.sh`, Prettier y ESLint                                                                                                  | OK                                                                                                                                                                                                                                                                                    |
 
+CI del PR #19 sobre `e5bba8c` (mismos Dockerfiles que `e5d87be`): 5/5 checks verdes (runs `44980190035` e `44980190077`).
+
+Riesgos residuales:
+
+- **npm en capas:** retirar npm, corepack y yarn los oculta en el contenedor (Trivy analiza el sistema de archivos final), pero sus archivos siguen en la capa de la imagen base. Eliminarlos de verdad exigiría una base sin npm (por ejemplo, distroless): es otra decisión.
+- **Versión de PostgreSQL:** `postgresql16-client` fija la versión mayor (16), no la exacta. Se aparta a propósito del pin exacto propuesto en §5.3: Alpine 3.24 publica una sola versión de cada paquete (hoy 16.16-r0) y retira la anterior al actualizarla, así que un pin exacto rompería el build con la siguiente. El contenido publicado queda fijado por el digest de la imagen y registrado en el SBOM. El cliente usa `libpq` 18.7 (de `postgresql18`), compatible con servidores 16; la comprobación contra RDS 16 sigue en P7.
+- **TLS de Prisma:** con `sslmode=require`, Prisma cifra pero **no verifica el certificado** (comprobado). Es la desviación C6 ya aceptada (ADR-AWS-05); `verify-full` con la CA de RDS queda como mejora.
+
 Pendiente:
 
-- La CI completa del PR (al publicarlo).
 - El workflow `ecr-publish` con `publish = false` sobre `main` después del merge de PR-6.1. La línea base sobre `main` = `1947788` (run `44957535259`) confirmó en GitHub los 615 bloqueos y que `verify` funciona.
