@@ -11,7 +11,7 @@
   - 5 interface endpoints en **1 AZ**.
   - WAF con 1 ACL y 6 reglas (2 rate-based y 4 grupos administrados).
 - Secretos: 8 de rol, 2 tokens, 1 ADMIN sintético y 1 del maestro de RDS (12).
-- Claves KMS: datos, JWT y SPA (3), más la del state del bootstrap (1).
+- Claves KMS: datos, JWT y SPA (3), más la del state del bootstrap (1). Desde PR-6.2, ECR cifra con la clave administrada por AWS `aws/ecr` (sin cuota mensual) y los registros de auditoría del state reutilizan la CMK del state: el número de CMK no cambia.
 - Tráfico de laboratorio despreciable: dentro del nivel gratuito permanente de CloudFront; de 2 a 4 GB al mes de logs (aplicación, WAF y Flow Logs).
 - Sin dominio propio, sin Container Insights, sin Performance Insights y sin Enhanced Monitoring.
 
@@ -29,7 +29,8 @@
 | KMS                                                                 | 3 claves del laboratorio + 1 del state; firmas `Sign` de bajo volumen                                 | ≈ 4                 |
 | CloudWatch                                                          | Ingesta de logs (≈ 2–4 GB × 0.50), 12 alarmas × 0.10, 4 métricas personalizadas de los filtros × 0.30 | ≈ 3–5               |
 | Cloud Map                                                           | Zona privada ≈ 0.50 + 3 instancias × 0.10                                                             | ≈ 0.8               |
-| ECR                                                                 | ≈ 2–10 GB × 0.10 (hasta 20 imágenes por repositorio)                                                  | ≈ 0.2–1             |
+| ECR (raíz `publisher`)                                              | ≈ 2–10 GB × 0.10 (hasta 20 imágenes por repositorio); `aws/ecr` sin cuota                             | ≈ 0.2–1             |
+| CloudTrail del state (`bootstrap`, PR-6.2)                          | Eventos de datos: 0.10 USD por 100 000 (Terraform genera < 1 000 al mes); registros de KB en S3       | < 0.05              |
 | CloudFront                                                          | Nivel gratuito permanente (1 TB y 10 M de peticiones)                                                 | ≈ 0                 |
 | S3 (SPA y state)                                                    | Pocos MB                                                                                              | < 0.2               |
 | VPC origin, Internet Gateway, gateway S3, SNS, Budgets (2 primeros) | Sin cargo                                                                                             | 0                   |
@@ -78,9 +79,13 @@ Con `service_desired_count = 0` solo se deja de pagar Fargate (≈ 45). **Siguen
 | Secretos en la ventana de recuperación (7 días) | `secret_recovery_window_days`                          | Verificar si cobran durante la ventana          |
 | Claves KMS pendientes de borrado (7 días)       | `kms_deletion_window_days`                             | Verificar si cobran durante la ventana          |
 | Bucket y clave KMS del state (bootstrap)        | `prevent_destroy`                                      | ≈ 1 USD/mes; se conserva entre ventanas         |
+| Auditoría del state y presupuesto (bootstrap)   | `prevent_destroy` en el bucket de auditoría; 365 días  | < 0.05 USD/mes; se conserva entre ventanas      |
+| Repositorios ECR (`publisher`)                  | Raíz aparte; `ecr_force_delete = false`                | ≈ 0.1 USD/GB-mes; destruir `lab` no los borra   |
 | Logs ya exportados o copiados fuera             | —                                                      | —                                               |
 
 ## 6. Control
 
 - **AWS Budgets antes del primer recurso:** límite de 50 USD con avisos al 50 % (25 USD) y al 100 % (50 USD) de gasto real, y al 100 % del pronóstico. Con el laboratorio 24/7, el aviso de 25 USD llega en unos 6 días y el de 50 en unos 11: el presupuesto está pensado para ventanas de 7 días.
+- **Desde PR-6.2, el presupuesto de la cuenta (`spectra-account-monthly`) se crea con el bootstrap**, la primera raíz que se aplica, y `budget_emails` es obligatorio (D7). Es **un aviso, no un límite de gasto**: AWS Budgets no detiene recursos (no hay acciones configuradas) y sus datos llegan con horas de retraso. El presupuesto del laboratorio (`spectra-lab-monthly`) sigue siendo opcional.
+- **Solo la publicación** (bootstrap + `publisher`, sin `lab`): ≈ 2–3 USD/mes (CMK del state ≈ 1, almacenamiento de ECR ≈ 0.1–1, S3 y CloudTrail < 0.3). Sin NAT, ALB, RDS, endpoints, WAF ni CloudFront.
 - La prueba P13 compara Cost Explorer con esta estimación tras 24 h.

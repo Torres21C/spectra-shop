@@ -39,14 +39,24 @@ flowchart LR
 
 ## 3. Preparación (propietario, una vez, con autorización)
 
-### 3.1 Rol y proveedor OIDC (Terraform)
+### 3.1 Repositorios, rol y proveedor OIDC (Terraform, raíz `infra/terraform/publisher`)
 
-1. Comprobar si la cuenta ya tiene el proveedor de GitHub: `aws iam list-open-id-connect-providers`.
-2. En `terraform.tfvars` (no versionado):
-   - `enable_ecr_publisher = true`;
-   - si el proveedor ya existe: `create_github_oidc_provider = false` y `github_oidc_provider_arn = "arn:aws:iam::<cuenta>:oidc-provider/token.actions.githubusercontent.com"`.
-3. Comprobar que el prefijo inmutable sigue siendo el de `github_oidc_subject_prefix`: `gh api repos/Torres21C/spectra-shop/actions/oidc/customization/sub`.
-4. `terraform plan` y `apply` con aprobación. Resultado: el rol `spectra-lab-ecr-publisher` y la salida `ecr_publisher_role_arn`.
+> [!WARNING]
+> **Desde PR-6.2, la publicación no se habilita en `environments/lab`.** Antes, `enable_ecr_publisher = true` estaba en la raíz del laboratorio completo: un `apply` allí habría creado **216 recursos** (RDS, ALB, CloudFront, WAF, ECS, endpoints…), no solo el rol. Ahora los 5 repositorios ECR y el rol publicador están en una raíz propia, [`infra/terraform/publisher`](../../infra/terraform/publisher/README.md), con su propio state, que solo puede crear ECR y el rol OIDC (lo comprueba `scripts/check_state_ownership.py` en la CI). `lab` ya no declara esas variables y lee los repositorios con `data "aws_ecr_repository"`. No hace falta `-target`.
+
+Orden, cada paso con autorización expresa del propietario:
+
+1. **`infra/terraform/bootstrap`**: bucket del state, auditoría de sus accesos con CloudTrail (R-PR5-26) y presupuesto de la cuenta (D7). Es la primera raíz que se aplica.
+2. **`infra/terraform/publisher`** (esta guía):
+   1. Consulta de solo lectura: ¿la cuenta ya tiene el proveedor OIDC de GitHub? (`aws iam list-open-id-connect-providers`).
+   2. En `publisher/terraform.tfvars` (no versionado):
+      - `enable_ecr_publisher = true` (con `false` solo se crean los 5 repositorios);
+      - si el proveedor ya existe: `create_github_oidc_provider = false`. Terraform lo **lee por su URL** y exige que acepte la audiencia `sts.amazonaws.com`; no lo importa ni lo administra (D3).
+   3. Comprobar que el prefijo inmutable sigue siendo el de `github_oidc_subject_prefix`: `gh api repos/Torres21C/spectra-shop/actions/oidc/customization/sub`.
+   4. `terraform init -backend-config=backend.hcl` (clave `spectra-shop/publisher/terraform.tfstate`), `terraform plan -out=tfplan` y revisión: **solo** `aws_ecr_repository` y `aws_ecr_lifecycle_policy` (5 de cada uno), `aws_iam_role`, `aws_iam_role_policy` y, si no existía, `aws_iam_openid_connect_provider`; 0 cambios y 0 destrucciones. Después, `apply` con aprobación. Resultado: el rol `spectra-lab-ecr-publisher` y la salida `ecr_publisher_role_arn`.
+3. **`environments/lab`**: solo para el despliegue (PR-7), nunca para publicar.
+
+Los repositorios cifran con la clave administrada por AWS `aws/ecr` (D2): el rol publicador no tiene permisos de KMS y P-PUB-1 confirma que no los necesita.
 
 ### 3.2 GitHub Environment `ecr-publish-lab` (antes del primer `publish = true`)
 
@@ -76,7 +86,7 @@ El rol confía en un `sub` exacto: `repo:Torres21C@84191196/spectra-shop@1457499
   ```
 
 - **Requisitos:**
-  - No cambiar la personalización OIDC del repositorio sin actualizar antes `github_oidc_subject_prefix` y aplicar.
+  - No cambiar la personalización OIDC del repositorio sin actualizar antes `github_oidc_subject_prefix` y aplicar la raíz `infra/terraform/publisher`.
   - Si se añade una plantilla con `include_claim_keys` (p. ej. `job_workflow_ref`, la mejora de R-PR6-07), el `sub` cambia de forma. Primero se actualiza la confianza del rol y después la plantilla; si no, los tokens se rechazan (fallo seguro: no se publica).
   - El nombre del Environment forma parte del `sub`. Si se renombra, hay que cambiar la variable `github_publish_environment` y el literal del workflow (`verify_workflows.py` lo exige).
   - Transferir o renombrar el repositorio cambia los identificadores (R-PR6-09).
@@ -100,7 +110,7 @@ _Settings → Rules → Rulesets → New branch ruleset_, objetivo `main`:
    - obtiene credenciales temporales;
    - publica las imágenes pendientes y verifica los 9 digest;
    - guarda `ecr-release-manifest-<sha>`.
-3. **Terraform**: `image_tag = "<sha>"`. El despliegue queda fuera de PR-6.
+3. **Terraform** (`environments/lab`): `image_tag = "<sha>"`. El despliegue queda fuera de PR-6.
 
 El manifiesto (`spectra-ecr-release/v1`) relaciona, para cada imagen:
 
