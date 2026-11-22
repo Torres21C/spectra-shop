@@ -1,4 +1,4 @@
-FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS build
+FROM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
 WORKDIR /workspace
 RUN npm install --global npm@11.19.0
 COPY package*.json ./
@@ -18,7 +18,7 @@ RUN npm run prisma:generate --workspace @spectra/audit-service && npm run build 
 # workspaces). Así la imagen de ejecución no contiene Prisma CLI, Vite, Vitest ni picomatch (AWS-07).
 # --omit=optional: `prisma` y `typescript` son peers opcionales de @prisma/client («devOptional» en
 # el lockfile) y npm los instalaría con solo --omit=dev. No hay otras dependencias opcionales de producción.
-FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS prod-deps
+FROM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS prod-deps
 WORKDIR /workspace
 RUN npm install --global npm@11.19.0
 COPY package*.json ./
@@ -31,7 +31,7 @@ COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci --omit=dev --omit=optional --workspace @spectra/audit-service --include-workspace-root=false --ignore-scripts
 
 # DT-09: dependencias de migración (producción + devDependencies del propio servicio, p. ej. Prisma CLI).
-FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS migrate-deps
+FROM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS migrate-deps
 WORKDIR /workspace
 RUN npm install --global npm@11.19.0
 COPY package*.json ./
@@ -44,7 +44,13 @@ COPY packages/contracts/package.json packages/contracts/package.json
 RUN npm ci --workspace @spectra/audit-service --include-workspace-root=false --ignore-scripts
 
 # Imagen de los jobs `*-migrate` (Compose: target migrate; AWS: tarea run-task). No arranca el servicio.
-FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS migrate
+FROM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS migrate
+# R-PR6-10: sin gestores de paquetes en la imagen final. La aplicación y las migraciones solo usan `node` y
+# `./node_modules/.bin/prisma` (Compose y ECS); nunca npm, npx, corepack ni yarn. Los archivos quedan ocultos
+# por esta capa (no accesibles en el contenedor) aunque sigan en la capa de la imagen base.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 ENV NODE_ENV=production
 # Sin salida a Internet en AWS: Prisma no debe intentar comprobar versiones ni telemetría.
 ENV CHECKPOINT_DISABLE=1
@@ -57,7 +63,13 @@ COPY --from=build --chown=node:node /workspace/apps/audit-service/prisma /app/pr
 COPY --from=build --chown=node:node /workspace/apps/audit-service/src/generated/audit-client /app/dist/generated/audit-client
 
 # Imagen de ejecución (etapa final: objetivo por defecto).
-FROM node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 AS runtime
+FROM node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS runtime
+# R-PR6-10: sin gestores de paquetes en la imagen final. La aplicación y las migraciones solo usan `node` y
+# `./node_modules/.bin/prisma` (Compose y ECS); nunca npm, npx, corepack ni yarn. Los archivos quedan ocultos
+# por esta capa (no accesibles en el contenedor) aunque sigan en la capa de la imagen base.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 ENV NODE_ENV=production
 WORKDIR /app
 USER node

@@ -208,6 +208,8 @@ Con la política aprobada, **las imágenes actuales de `main` no se pueden publi
 
 Después hay que repetir el ensayo con `publish = false`.
 
+**PR-6.1 (2026-11-21)** aplica esa corrección: 0 CRITICAL/HIGH en las 9 imágenes, con la política sin cambios. Resultados en [06-diagnostico-imagenes-base.md, §7](06-diagnostico-imagenes-base.md#7-resultado-de-la-remediación-pr-61-2026-11-21-local).
+
 ### Contenido de los artefactos (repositorio público)
 
 Cualquier usuario autenticado en GitHub puede descargar los artefactos de un repositorio público durante su retención (7 días para `ecr-release-<sha>` y 90 para el manifiesto). Lo que contienen, revisado en el ensayo local del 2026-11-21:
