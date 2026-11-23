@@ -73,15 +73,15 @@ Con `service_desired_count = 0` solo se deja de pagar Fargate (≈ 45). **Siguen
 
 `terraform destroy` del entorno (con autorización; ver README §3.7). Tras la destrucción quedan:
 
-| Residual                                        | Motivo                                                 | Acción                                          |
-| ----------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------- |
-| Snapshot final de RDS                           | Por defecto se crea (`db_skip_final_snapshot = false`) | Borrarlo cuando ya no haga falta (autorización) |
-| Secretos en la ventana de recuperación (7 días) | `secret_recovery_window_days`                          | Verificar si cobran durante la ventana          |
-| Claves KMS pendientes de borrado (7 días)       | `kms_deletion_window_days`                             | Verificar si cobran durante la ventana          |
-| Bucket y clave KMS del state (bootstrap)        | `prevent_destroy`                                      | ≈ 1 USD/mes; se conserva entre ventanas         |
-| Auditoría del state y presupuesto (bootstrap)   | `prevent_destroy` en el bucket de auditoría; 365 días  | < 0.05 USD/mes; se conserva entre ventanas      |
-| Repositorios ECR (`publisher`)                  | Raíz aparte; `ecr_force_delete = false`                | ≈ 0.1 USD/GB-mes; destruir `lab` no los borra   |
-| Logs ya exportados o copiados fuera             | —                                                      | —                                               |
+| Residual                                               | Motivo                                                                       | Acción                                                                   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Snapshot final de RDS                                  | `synthetic-discard` lo omite; los snapshots manuales están prohibidos en lab | Reconstruir exclusivamente desde migraciones y seeds                     |
+| Secretos en la ventana de recuperación (7 días)        | Se borran diferidamente bajo el prefijo del `lab_cycle_id` anterior          | No bloquean el ciclo siguiente; comprobar su estado hasta la eliminación |
+| Claves KMS pendientes de borrado (14 días por defecto) | `kms_deletion_window_days`, al menos un día mayor que Secrets Manager        | Verificar si cobran durante la ventana; no confundirla con un backup     |
+| Bucket y clave KMS del state (bootstrap)               | `prevent_destroy`                                                            | ≈ 1 USD/mes; se conserva entre ventanas                                  |
+| Auditoría del state y presupuesto (bootstrap)          | `prevent_destroy` en el bucket de auditoría; 365 días                        | < 0.05 USD/mes; se conserva entre ventanas                               |
+| Repositorios ECR (`publisher`)                         | Raíz aparte; `ecr_force_delete = false`                                      | ≈ 0.1 USD/GB-mes; destruir `lab` no los borra                            |
+| Logs ya exportados o copiados fuera                    | —                                                                            | —                                                                        |
 
 ## 6. Control
 
@@ -89,3 +89,4 @@ Con `service_desired_count = 0` solo se deja de pagar Fargate (≈ 45). **Siguen
 - **Desde PR-6.2, el presupuesto de la cuenta (`spectra-account-monthly`) se crea con el bootstrap**, la primera raíz que se aplica, y `budget_emails` es obligatorio (D7). Es **un aviso, no un límite de gasto**: AWS Budgets no detiene recursos (no hay acciones configuradas) y sus datos llegan con horas de retraso. El presupuesto del laboratorio (`spectra-lab-monthly`) sigue siendo opcional.
 - **Solo la publicación** (bootstrap + `publisher`, sin `lab`): ≈ 2–3 USD/mes (CMK del state ≈ 1, almacenamiento de ECR ≈ 0.1–1, S3 y CloudTrail < 0.3). Sin NAT, ALB, RDS, endpoints, WAF ni CloudFront.
 - La prueba P13 compara Cost Explorer con esta estimación tras 24 h.
+- Tras cada destroy, el cierre exige inventario inmediato por `LabCycle` y otra comprobación 24–48 h después. Budgets es una alerta retrasada, no un interruptor. Los principales residuos facturables son snapshots manuales, endpoints, ALB, RDS, CloudFront/WAF, log groups o el bucket SPA si la eliminación falla.

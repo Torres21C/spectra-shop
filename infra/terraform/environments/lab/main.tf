@@ -104,21 +104,23 @@ module "endpoints" {
 module "database" {
   source = "../../modules/database"
 
-  identifier                = "${local.name_prefix}-db"
-  engine_version            = var.db_engine_version
-  instance_class            = var.db_instance_class
-  db_name                   = var.db_name
-  master_username           = var.db_master_username
-  allocated_storage_gb      = var.db_allocated_storage_gb
-  max_allocated_storage_gb  = var.db_max_allocated_storage_gb
-  subnet_ids                = module.network.data_subnet_ids
-  rds_sg_id                 = module.security_groups.rds_sg_id
-  kms_key_arn               = module.kms.data_key_arn
-  ca_cert_identifier        = var.db_ca_cert_identifier
-  backup_retention_days     = var.db_backup_retention_days
-  deletion_protection       = var.db_deletion_protection
-  skip_final_snapshot       = var.db_skip_final_snapshot
-  final_snapshot_identifier = var.db_final_snapshot_identifier
+  identifier               = "${local.name_prefix}-db"
+  engine_version           = var.db_engine_version
+  instance_class           = var.db_instance_class
+  db_name                  = var.db_name
+  master_username          = var.db_master_username
+  allocated_storage_gb     = var.db_allocated_storage_gb
+  max_allocated_storage_gb = var.db_max_allocated_storage_gb
+  subnet_ids               = module.network.data_subnet_ids
+  rds_sg_id                = module.security_groups.rds_sg_id
+  kms_key_arn              = module.kms.data_key_arn
+  ca_cert_identifier       = var.db_ca_cert_identifier
+  backup_retention_days    = var.db_backup_retention_days
+  deletion_protection      = var.db_deletion_protection
+  # synthetic-discard: un snapshot cifrado con esta CMK efímera dejaría de ser restaurable cuando el
+  # destroy programe el borrado de module.kms.data. La raíz lab no expone un modo de retención inseguro.
+  skip_final_snapshot       = true
+  final_snapshot_identifier = null
   apply_immediately         = var.db_apply_immediately
   log_retention_days        = var.log_retention_days
 }
@@ -126,7 +128,9 @@ module "database" {
 module "secrets" {
   source = "../../modules/secrets"
 
-  secret_prefix         = "spectra/${var.environment}"
+  # Cada reconstrucción usa nombres nuevos mientras los secretos del ciclo anterior cumplen su ventana de
+  # recuperación. El prefijo no altera el environment, el backend ni los repositorios ECR compartidos.
+  secret_prefix         = "spectra/${var.environment}/${var.lab_cycle_id}"
   kms_key_arn           = module.kms.data_key_arn
   recovery_window_days  = var.secret_recovery_window_days
   db_address            = module.database.address

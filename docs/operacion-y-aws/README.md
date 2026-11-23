@@ -10,6 +10,7 @@ Documentación operativa de SPECTRA Shop sobre `main` = `2a27350` (MVP con M06/M
 | [04-plan-despliegue-aws.md](04-plan-despliegue-aws.md)             | **Propuesta** de arquitectura y procedimiento de laboratorio (ECS Fargate, RDS, CloudFront), costos, destrucción y plan por PR |
 | [05-publicacion-ecr.md](05-publicacion-ecr.md)                     | Publicación manual de las 9 imágenes en ECR con OIDC (PR-6): Environment, protección de `main`, fallos seguros y excepciones   |
 | [06-diagnostico-imagenes-base.md](06-diagnostico-imagenes-base.md) | Vulnerabilidades de las imágenes base que bloquean la primera publicación (R-PR6-10) y propuesta de PR-6.1                     |
+| [07-ciclo-laboratorio-efimero.md](07-ciclo-laboratorio-efimero.md) | Runbook completo de preparación, despliegue, evidencia, apagado y verificación por ciclo                                       |
 | [postman/](postman/README.md)                                      | Colecciones Postman v2.1 (por servicio y flujo E2E), entornos y guía de ejecución                                              |
 
 > [!WARNING]

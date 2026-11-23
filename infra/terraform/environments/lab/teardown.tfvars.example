@@ -1,0 +1,10 @@
+# Copie a teardown.tfvars (ignorado por Git) SOLO para un apagado autorizado. Se combina con el tfvars del
+# mismo ciclo mediante dos -var-file explícitos; no contiene identidad de ciclo, secretos ni ejecuta acciones.
+#
+# terraform plan/apply requieren revisión y autorización separadas. Nunca use -auto-approve.
+
+teardown_mode            = true
+service_desired_count    = 0
+db_deletion_protection   = false
+spa_bucket_force_destroy = true
+alb_deletion_protection  = false

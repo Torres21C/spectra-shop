@@ -8,6 +8,7 @@ provider "aws" {
       Environment = var.environment
       ManagedBy   = "terraform"
       Stack       = "infra/terraform/environments/${var.environment}"
+      LabCycle    = var.lab_cycle_id
     }
   }
 }

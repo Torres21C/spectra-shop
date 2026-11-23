@@ -192,6 +192,20 @@ def analyze(tf_root: Path) -> tuple[list[str], dict]:
     if not any(dtype == "aws_ecr_repository" for dtype, _ in lab["data"]):
         errors.append('lab: debe leer los repositorios con data "aws_ecr_repository" (no crearlos)')
 
+    lab_main = (tf_root / "environments/lab/main.tf").read_text()
+    lab_provider = (tf_root / "environments/lab/providers.tf").read_text()
+    lab_backend = (tf_root / "environments/lab/backend.hcl.example").read_text()
+    if not re.search(r'secret_prefix\s*=\s*"spectra/\$\{var\.environment\}/\$\{var\.lab_cycle_id\}"', lab_main):
+        errors.append("lab: los secretos deben incluir var.lab_cycle_id sin cambiar environment")
+    if not re.search(r'LabCycle\s*=\s*var\.lab_cycle_id', lab_provider):
+        errors.append("lab: default_tags debe registrar LabCycle = var.lab_cycle_id")
+    if not re.search(r'skip_final_snapshot\s*=\s*true', lab_main):
+        errors.append("lab: synthetic-discard debe omitir incondicionalmente el snapshot final")
+    if re.search(r'final_snapshot_identifier\s*=\s*"', lab_main):
+        errors.append("lab: no puede declarar un identificador fijo de snapshot final")
+    if not re.search(r'key\s*=\s*"spectra-shop/lab/terraform\.tfstate"', lab_backend):
+        errors.append("lab: lab_cycle_id no puede cambiar la clave estable del backend")
+
     pub_repos, lab_repos = repositories(roots["publisher"]["blocks"]), repositories(lab["blocks"])
     if not pub_repos or len(pub_repos) != 5 or sorted(pub_repos) != sorted(lab_repos or []):
         errors.append(f"publisher y lab deben declarar los mismos 5 repositorios: {pub_repos} / {lab_repos}")

@@ -22,3 +22,8 @@ output "master_secret_arn" {
   description = "ARN del secreto del maestro gestionado por RDS (claves username y password)."
   value       = aws_db_instance.this.master_user_secret[0].secret_arn
 }
+
+output "skip_final_snapshot" {
+  description = "Confirma la política efectiva de snapshot final sin exponer datos."
+  value       = aws_db_instance.this.skip_final_snapshot
+}

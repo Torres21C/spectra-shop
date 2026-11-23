@@ -40,18 +40,18 @@ terraform init -backend-config=backend.hcl
 terraform plan                                     # no guarde planes dentro del repositorio
 ```
 
-`image_tag` es el SHA completo del commit cuyas imágenes publicó PR-6 en ECR (servicios `:<sha>`, migraciones `:<sha>-migrate`, `db-ops:<sha>`).
+`image_tag` es el SHA completo del commit cuyas imágenes publicó PR-6 en ECR (servicios `:<sha>`, migraciones `:<sha>-migrate`, `db-ops:<sha>`). `lab_cycle_id` es obligatorio, identifica una sola creación y no puede cambiar hasta haber destruido y verificado el ciclo. Se registra en etiquetas y en los nombres `spectra/lab/<ciclo>/...`, pero no cambia el backend ni ECR. Véase el [runbook efímero](../../../../docs/operacion-y-aws/07-ciclo-laboratorio-efimero.md).
 
 ### 3.2 Primer `apply` (sin tareas)
 
-Con `service_desired_count = 0` y `alb_ingress_source = "prefix_list"`. Crea la red, los endpoints, KMS, RDS, los secretos (con valores generados), ECR, el ALB, CloudFront con WAF, las task definitions y los servicios ECS **sin tareas**. Antes de nada debe existir el presupuesto (variable `budget_emails`).
+Con `service_desired_count = 0` y `alb_ingress_source = "prefix_list"`. Crea la red, los endpoints, KMS, RDS, secretos con valores generados, ALB, CloudFront con WAF, task definitions y servicios ECS **sin tareas**. ECR pertenece a `publisher` y aquí solo se lee. La política fija `synthetic-discard`: datos ficticios regenerables y ningún snapshot final cifrado por la CMK efímera. Antes debe existir el presupuesto (variable `budget_emails`). Este y todo `apply` posterior se hacen sobre un plan guardado validado con `lab_teardown_guard.py --mode deploy` ([runbook §3.0](../../../../docs/operacion-y-aws/07-ciclo-laboratorio-efimero.md)); el guard rechaza cambiar `lab_cycle_id` sobre un state activo.
 
 ### 3.3 Aprovisionamiento y migraciones (manual, en serie)
 
 Terraform **solo define** las tareas; nunca las ejecuta (DT-09). El runbook definitivo es parte de PR-7; orden y comandos de referencia:
 
 ```sh
-# Snapshot manual de RDS antes de cualquier migración nueva (plan §11).
+# synthetic-discard: no crear snapshots manuales; los datos se reconstruyen con migraciones y seeds.
 CLUSTER=$(terraform output -raw ecs_cluster_name)
 NET=$(terraform output -json run_task_network_configuration)
 for t in db-provision identity-migrate catalog-migrate commerce-migrate audit-migrate db-finalize; do
@@ -80,25 +80,32 @@ PR-6 compila la SPA con `VITE_*_API_URL = $(terraform output -raw public_origin)
 
 ### 3.7 Destrucción controlada (con autorización)
 
-1. Decidir el snapshot final de RDS. Por defecto se crea `spectra-lab-db-final` (tiene costo de almacenamiento). Omitirlo (`db_skip_final_snapshot = true`) requiere autorización expresa. El nombre debe ser único: si ya existe uno de una destrucción anterior, cámbielo.
-2. `db_deletion_protection = false` y, si hay objetos, `spa_bucket_force_destroy = true`. Ejecutar `apply` y revisar el plan. Los repositorios ECR **no** se destruyen con este entorno: los administra `infra/terraform/publisher` (PR-6.2).
-3. `terraform destroy` y revisar la lista **antes** de confirmar. CloudFront tarda varios minutos en deshabilitarse.
-4. Quedan pendientes de borrado: los secretos (`secret_recovery_window_days`; durante la ventana sus nombres siguen reservados y recrear el laboratorio falla con conflicto de nombre) y las claves KMS (`kms_deletion_window_days`).
-5. Comprobar que no queda nada: `aws resourcegroupstaggingapi get-resources --tag-filters Key=Project,Values=spectra-shop` (también los tipos `cloudfront` y `wafv2`). Revisar Cost Explorer 24–48 h después.
+1. Preservar las evidencias fuera de recursos cifrados por las CMK efímeras. No puede haber datos reales: `synthetic-discard` omite incondicionalmente el snapshot final, porque conservarlo mientras se elimina su CMK produciría una copia irrecuperable.
+2. Copiar `teardown.tfvars.example` a `teardown.tfvars`. El overlay no contiene `lab_cycle_id`: debe cargarse
+   junto al `terraform.tfvars` del ciclo con ambos `-var-file` explícitos.
+3. Generar plan guardado, JSON y `terraform state pull`; validar backend, workspace, lineage, ciclo y allowlist
+   con `lab_teardown_guard.py --mode prepare` antes de aplicar el plan autorizado.
+4. Confirmar cero tareas. Generar un plan guardado con `-destroy` y los mismos dos `-var-file`; validarlo con
+   `lab_teardown_guard.py --mode destroy` y aplicar **ese plan**, nunca un destroy directo. No usar
+   `-auto-approve`. Los comandos exactos están en el [runbook](../../../../docs/operacion-y-aws/07-ciclo-laboratorio-efimero.md).
+5. Los secretos mantienen 7 días de recuperación; las claves usan 14 días por defecto y como mínimo un día
+   adicional. Recuperar exige cancelar el borrado de la CMK antes de que venza y restaurar ambos recursos; no
+   constituye un backup.
+6. Con autorización de lectura posterior, comprobar residuos por `Project`, `Environment` y `LabCycle`, y revisar costos 24–48 h después.
 
 ## 4. Secretos: inicialización y rotación
 
 **Principio:** ninguna contraseña, token ni clave privada pasa por el state, el plan, los tfvars ni los logs de Terraform.
 
-| Secreto                                  | Contenido                             | Generación                                                              | Lo consume                                                         |
-| ---------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `spectra/lab/db/<svc>-migrator` (×4)     | `{username, password, url}`           | `ephemeral random_password` (64 hex) → `secret_string_wo`               | `db-provision` (`password`), `<svc>-migrate` (`url`)               |
-| `spectra/lab/db/<svc>-app` (×4)          | ídem                                  | ídem                                                                    | `db-provision` (`password`), servicio `<svc>` (`url`)              |
-| `spectra/lab/internal-token`             | 64 hex                                | ídem                                                                    | `SPECTRA_INTERNAL_TOKEN(S)` en identity, catalog, commerce y audit |
-| `spectra/lab/inventory-token`            | 64 hex, distinto                      | ídem                                                                    | `CATALOG_INVENTORY_TOKEN(S)` (commerce → catalog)                  |
-| `spectra/lab/synthetic-admin` (opcional) | `{email, password}`                   | correo de la variable; contraseña efímera de 32 caracteres              | `identity-migrate` (seed, solo inserta)                            |
-| `rds!db-…`                               | `{username, password}` del maestro    | **RDS** (`manage_master_user_password`), con rotación automática de RDS | `db-provision`, `db-finalize`                                      |
-| Clave de firma JWT                       | Clave privada P-256 **dentro de KMS** | `aws_kms_key` `ECC_NIST_P256`                                           | identity (`kms:Sign`); la pública va en `IDENTITY_PUBLIC_KEY_PEM`  |
+| Secreto                                          | Contenido                             | Generación                                                              | Lo consume                                                         |
+| ------------------------------------------------ | ------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `spectra/lab/<ciclo>/db/<svc>-migrator` (×4)     | `{username, password, url}`           | `ephemeral random_password` (64 hex) → `secret_string_wo`               | `db-provision` (`password`), `<svc>-migrate` (`url`)               |
+| `spectra/lab/<ciclo>/db/<svc>-app` (×4)          | ídem                                  | ídem                                                                    | `db-provision` (`password`), servicio `<svc>` (`url`)              |
+| `spectra/lab/<ciclo>/internal-token`             | 64 hex                                | ídem                                                                    | `SPECTRA_INTERNAL_TOKEN(S)` en identity, catalog, commerce y audit |
+| `spectra/lab/<ciclo>/inventory-token`            | 64 hex, distinto                      | ídem                                                                    | `CATALOG_INVENTORY_TOKEN(S)` (commerce → catalog)                  |
+| `spectra/lab/<ciclo>/synthetic-admin` (opcional) | `{email, password}`                   | correo de la variable; contraseña efímera de 32 caracteres              | `identity-migrate` (seed, solo inserta)                            |
+| `rds!db-…`                                       | `{username, password}` del maestro    | **RDS** (`manage_master_user_password`), con rotación automática de RDS | `db-provision`, `db-finalize`                                      |
+| Clave de firma JWT                               | Clave privada P-256 **dentro de KMS** | `aws_kms_key` `ECC_NIST_P256`                                           | identity (`kms:Sign`); la pública va en `IDENTITY_PUBLIC_KEY_PEM`  |
 
 **Cómo funciona.** El valor efímero se genera en memoria en cada ejecución. `secret_string_wo` solo se envía al **crear** el secreto o cuando aumenta `secret_string_wo_version` (variable `secret_versions`). En las demás ejecuciones el valor generado se descarta.
 
