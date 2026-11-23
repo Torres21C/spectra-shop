@@ -124,6 +124,28 @@ class StateOwnershipTests(unittest.TestCase):
         self.append("bootstrap/main.tf", 'resource "aws_iam_role" "x" {\n  name = "x"\n}')
         self.assertFails("bootstrap: recurso no permitido en esta raíz: aws_iam_role.x")
 
+    def test_lab_secret_prefix_must_include_cycle(self):
+        self.replace("environments/lab/main.tf", 'secret_prefix         = "spectra/${var.environment}/${var.lab_cycle_id}"',
+                     'secret_prefix         = "spectra/${var.environment}"')
+        self.assertFails("secretos deben incluir var.lab_cycle_id")
+
+    def test_lab_tags_must_include_cycle(self):
+        self.replace("environments/lab/providers.tf", "LabCycle    = var.lab_cycle_id", 'LabCycle    = "fixed"')
+        self.assertFails("default_tags debe registrar LabCycle")
+
+    def test_lab_must_discard_final_snapshot(self):
+        self.replace("environments/lab/main.tf", "skip_final_snapshot       = true", "skip_final_snapshot       = false")
+        self.assertFails("omitir incondicionalmente")
+
+    def test_lab_cannot_use_fixed_final_snapshot_identifier(self):
+        self.replace("environments/lab/main.tf", "final_snapshot_identifier = null", 'final_snapshot_identifier = "spectra-final"')
+        self.assertFails("identificador fijo")
+
+    def test_lab_backend_key_cannot_move_to_publisher(self):
+        self.replace("environments/lab/backend.hcl.example", 'key          = "spectra-shop/lab/terraform.tfstate"',
+                     'key          = "spectra-shop/publisher/terraform.tfstate"')
+        self.assertFails("clave estable del backend")
+
 
 if __name__ == "__main__":
     unittest.main()

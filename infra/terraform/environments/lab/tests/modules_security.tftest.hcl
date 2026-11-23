@@ -92,7 +92,7 @@ run "secrets_never_planned_in_clear" {
   }
 
   variables {
-    secret_prefix         = "spectra/lab"
+    secret_prefix         = "spectra/lab/20261122-a"
     kms_key_arn           = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
     recovery_window_days  = 7
     db_address            = "spectra-lab-db.example.us-east-1.rds.amazonaws.com"
@@ -121,5 +121,87 @@ run "secrets_never_planned_in_clear" {
   assert {
     condition     = alltrue([for v in aws_secretsmanager_secret_version.db_role : v.secret_string_wo_version == 1])
     error_message = "La versión inicial de cada secreto debe ser 1."
+  }
+
+  assert {
+    condition = alltrue(concat(
+      [for secret in aws_secretsmanager_secret.db_role : startswith(secret.name, "spectra/lab/20261122-a/") && secret.recovery_window_in_days == 7],
+      [for secret in aws_secretsmanager_secret.token : startswith(secret.name, "spectra/lab/20261122-a/") && secret.recovery_window_in_days == 7],
+      [for secret in aws_secretsmanager_secret.synthetic_admin : startswith(secret.name, "spectra/lab/20261122-a/") && secret.recovery_window_in_days == 7],
+    ))
+    error_message = "Los secretos deben aislarse por ciclo y conservar siete días de recuperación."
+  }
+}
+
+run "database_always_discards_final_snapshot" {
+  command = plan
+
+  module {
+    source = "../../modules/database"
+  }
+
+  variables {
+    identifier                = "spectra-lab-db"
+    engine_version            = "16"
+    instance_class            = "db.t4g.micro"
+    db_name                   = "spectra_shop"
+    master_username           = "spectra_admin"
+    allocated_storage_gb      = 20
+    max_allocated_storage_gb  = 20
+    subnet_ids                = ["subnet-aaaa", "subnet-bbbb"]
+    rds_sg_id                 = "sg-0123456789abcdef0"
+    kms_key_arn               = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
+    ca_cert_identifier        = "rds-ca-rsa2048-g1"
+    backup_retention_days     = 1
+    deletion_protection       = false
+    skip_final_snapshot       = true
+    final_snapshot_identifier = "this-value-must-be-ignored"
+    apply_immediately         = true
+    log_retention_days        = 30
+  }
+
+  assert {
+    condition     = aws_db_instance.this.skip_final_snapshot && aws_db_instance.this.final_snapshot_identifier == null
+    error_message = "El recurso RDS debe omitir el snapshot final y anular cualquier identificador cuando synthetic-discard está activo."
+  }
+
+  assert {
+    condition     = output.skip_final_snapshot == aws_db_instance.this.skip_final_snapshot
+    error_message = "El output skip_final_snapshot debe reflejar el recurso RDS, no un valor fijo."
+  }
+}
+
+run "database_output_reflects_resource_snapshot_policy" {
+  command = plan
+
+  module {
+    source = "../../modules/database"
+  }
+
+  variables {
+    identifier                = "spectra-lab-db"
+    engine_version            = "16"
+    instance_class            = "db.t4g.micro"
+    db_name                   = "spectra_shop"
+    master_username           = "spectra_admin"
+    allocated_storage_gb      = 20
+    max_allocated_storage_gb  = 20
+    subnet_ids                = ["subnet-aaaa", "subnet-bbbb"]
+    rds_sg_id                 = "sg-0123456789abcdef0"
+    kms_key_arn               = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
+    ca_cert_identifier        = "rds-ca-rsa2048-g1"
+    backup_retention_days     = 1
+    deletion_protection       = true
+    skip_final_snapshot       = false
+    final_snapshot_identifier = "module-generic-case"
+    apply_immediately         = true
+    log_retention_days        = 30
+  }
+
+  # El módulo es genérico; la raíz lab fija skip_final_snapshot=true (lo comprueban lab_plan y
+  # check_state_ownership). Esta ejecución impide que el output oculte el valor real del recurso.
+  assert {
+    condition     = !output.skip_final_snapshot && !aws_db_instance.this.skip_final_snapshot
+    error_message = "El output skip_final_snapshot debe reflejar el recurso RDS, no un valor fijo."
   }
 }

@@ -46,7 +46,8 @@ mock_provider "aws" {
 mock_provider "random" {}
 
 variables {
-  image_tag = "0123456789abcdef0123456789abcdef01234567"
+  image_tag    = "0123456789abcdef0123456789abcdef01234567"
+  lab_cycle_id = "20261122-a"
 }
 
 run "plan_with_defaults" {
@@ -76,6 +77,179 @@ run "plan_with_defaults" {
     condition     = length(output.ecr_repository_urls) == 5
     error_message = "PR-6.2: las task definitions usan las URL de los repositorios leídos."
   }
+
+  assert {
+    condition     = output.lab_cycle_id == "20261122-a" && output.lab_data_policy == "synthetic-discard" && !output.teardown_mode
+    error_message = "El identificador del ciclo y la política sintética deben quedar disponibles para las evidencias."
+  }
+
+  assert {
+    condition     = output.rds_skip_final_snapshot
+    error_message = "synthetic-discard debe omitir siempre el snapshot final cifrado con la CMK efímera."
+  }
+
+  assert {
+    condition     = alltrue([for name in output.secret_names : startswith(name, "spectra/lab/20261122-a/")])
+    error_message = "Todos los secretos deben quedar aislados bajo el identificador del ciclo."
+  }
+}
+
+run "rejects_invalid_lab_cycle_id" {
+  command = plan
+
+  variables {
+    lab_cycle_id = "Cycle_2026!"
+  }
+
+  expect_failures = [var.lab_cycle_id]
+}
+
+run "second_cycle_uses_disjoint_secret_names" {
+  command = plan
+
+  variables {
+    lab_cycle_id = "20261122-b"
+  }
+
+  assert {
+    condition = alltrue([
+      for name in output.secret_names :
+      startswith(name, "spectra/lab/20261122-b/") && !startswith(name, "spectra/lab/20261122-a/")
+    ])
+    error_message = "Una reconstrucción debe usar nombres de secretos disjuntos del ciclo anterior."
+  }
+}
+
+run "rejects_snapshot_retention_policy" {
+  command = plan
+
+  variables {
+    lab_data_policy = "retain-final-snapshot"
+  }
+
+  expect_failures = [var.lab_data_policy]
+}
+
+run "rejects_immediate_secret_deletion" {
+  command = plan
+
+  variables {
+    secret_recovery_window_days = 0
+  }
+
+  expect_failures = [var.secret_recovery_window_days]
+}
+
+run "rejects_kms_deletion_before_secret_recovery" {
+  command = plan
+
+  variables {
+    secret_recovery_window_days = 14
+    kms_deletion_window_days    = 7
+  }
+
+  expect_failures = [var.kms_deletion_window_days]
+}
+
+run "rejects_equal_kms_and_secret_windows" {
+  command = plan
+
+  variables {
+    secret_recovery_window_days = 7
+    kms_deletion_window_days    = 7
+  }
+
+  expect_failures = [var.kms_deletion_window_days]
+}
+
+run "accepts_complete_teardown_configuration" {
+  command = plan
+
+  variables {
+    teardown_mode            = true
+    service_desired_count    = 0
+    db_deletion_protection   = false
+    spa_bucket_force_destroy = true
+    alb_deletion_protection  = false
+  }
+}
+
+run "rejects_incomplete_teardown_configuration" {
+  command = plan
+
+  variables {
+    teardown_mode            = true
+    db_deletion_protection   = false
+    service_desired_count    = 1
+    spa_bucket_force_destroy = true
+  }
+
+  expect_failures = [var.teardown_mode]
+}
+
+run "rejects_teardown_with_protected_rds" {
+  command = plan
+
+  variables {
+    teardown_mode            = true
+    service_desired_count    = 0
+    db_deletion_protection   = true
+    spa_bucket_force_destroy = true
+    alb_deletion_protection  = false
+  }
+
+  expect_failures = [var.teardown_mode]
+}
+
+run "rejects_teardown_without_spa_force_destroy" {
+  command = plan
+
+  variables {
+    teardown_mode            = true
+    service_desired_count    = 0
+    db_deletion_protection   = false
+    spa_bucket_force_destroy = false
+    alb_deletion_protection  = false
+  }
+
+  expect_failures = [var.teardown_mode]
+}
+
+run "rejects_teardown_with_protected_alb" {
+  command = plan
+
+  variables {
+    teardown_mode            = true
+    service_desired_count    = 0
+    db_deletion_protection   = false
+    spa_bucket_force_destroy = true
+    alb_deletion_protection  = true
+  }
+
+  expect_failures = [var.teardown_mode]
+}
+
+run "rejects_normal_configuration_with_spa_force_destroy" {
+  command = plan
+
+  variables {
+    teardown_mode            = false
+    db_deletion_protection   = true
+    spa_bucket_force_destroy = true
+  }
+
+  expect_failures = [var.teardown_mode]
+}
+
+run "rejects_weakened_normal_configuration" {
+  command = plan
+
+  variables {
+    teardown_mode          = false
+    db_deletion_protection = false
+  }
+
+  expect_failures = [var.teardown_mode]
 }
 
 run "rejects_trust_proxy_true" {
