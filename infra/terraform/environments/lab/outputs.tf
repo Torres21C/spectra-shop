@@ -5,6 +5,21 @@ output "account_id" {
   value       = local.account_id
 }
 
+output "lab_cycle_id" {
+  description = "Identificador no sensible del ciclo; debe acompañar todas las evidencias y comprobaciones residuales."
+  value       = var.lab_cycle_id
+}
+
+output "lab_data_policy" {
+  description = "Política de datos aplicada por esta raíz."
+  value       = var.lab_data_policy
+}
+
+output "teardown_mode" {
+  description = "Indica si el plan usa las precondiciones controladas de apagado; no ejecuta acciones."
+  value       = var.teardown_mode
+}
+
 output "public_origin" {
   description = "Origen público https://<dominio>: VITE_*_API_URL del build de la Web (PR-6) y CORS_ORIGINS."
   value       = module.edge.public_origin
@@ -62,6 +77,11 @@ output "rds_address" {
 output "rds_master_secret_arn" {
   description = "Secreto del maestro gestionado por RDS (solo db-provision/db-finalize)."
   value       = module.database.master_secret_arn
+}
+
+output "rds_skip_final_snapshot" {
+  description = "Debe ser true bajo synthetic-discard: la CMK de RDS se elimina con el laboratorio."
+  value       = module.database.skip_final_snapshot
 }
 
 output "secret_names" {

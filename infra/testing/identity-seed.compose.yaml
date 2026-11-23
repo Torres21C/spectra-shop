@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    pull_policy: never
+    environment:
+      POSTGRES_DB: spectra_identity_seed_test
+      POSTGRES_USER: spectra_seed_test
+      POSTGRES_PASSWORD: ${IDENTITY_SEED_POSTGRES_PASSWORD:?define a disposable synthetic password}
+    ports:
+      - '127.0.0.1::5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U spectra_seed_test -d spectra_identity_seed_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    networks:
+      - identity-seed
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+networks:
+  identity-seed: {}
+
+volumes:
+  postgres-data: {}

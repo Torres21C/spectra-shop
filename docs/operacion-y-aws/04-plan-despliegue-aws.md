@@ -204,18 +204,18 @@ Las plantillas JSON de confianza OIDC y de la política de KMS están en la Fase
 
 Todos los valores se generan sin mostrarlos (p. ej., en AWS CloudShell, `openssl rand -hex 32 | aws secretsmanager create-secret --name … --secret-string file:///dev/stdin`). **Las contraseñas de los roles deben ser hexadecimales de 32 a 128 caracteres y todas distintas** (lo valida el aprovisionamiento). Si se usa Terraform, el _state_ contendrá los secretos: backend S3 cifrado con KMS y acceso restringido.
 
-| Secreto                                             | Contenido                                                                                                      | Lo consume (variable)                                                                                       |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `rds!db-…` (gestionado por RDS)                     | Usuario y contraseña del maestro                                                                               | `db-provision`, `db-finalize` (`PGUSER`, `PGPASSWORD`)                                                      |
-| `spectra/lab/db/identity-migrator`                  | `{password, url}`                                                                                              | `db-provision` (password); `identity-migrate` (`IDENTITY_DATABASE_URL`)                                     |
-| `spectra/lab/db/identity-app`                       | `{password, url}`                                                                                              | `db-provision`; identity-service (`IDENTITY_DATABASE_URL`)                                                  |
-| `spectra/lab/db/catalog-migrator` / `catalog-app`   | ídem                                                                                                           | `db-provision`; `catalog-migrate` / catalog-service (`DATABASE_URL`)                                        |
-| `spectra/lab/db/commerce-migrator` / `commerce-app` | ídem                                                                                                           | `db-provision`; `commerce-migrate` / commerce-service (`COMMERCE_DATABASE_URL`)                             |
-| `spectra/lab/db/audit-migrator` / `audit-app`       | ídem                                                                                                           | `db-provision`; `audit-migrate` / audit-service (`AUDIT_DATABASE_URL`)                                      |
-| `spectra/lab/internal-token`                        | Token de 64 hex                                                                                                | identity, catalog y audit (`SPECTRA_INTERNAL_TOKENS`); catalog, commerce y audit (`SPECTRA_INTERNAL_TOKEN`) |
-| `spectra/lab/inventory-token`                       | Token de 64 hex, distinto del anterior                                                                         | catalog (`CATALOG_INVENTORY_TOKENS`); commerce (`CATALOG_INVENTORY_TOKEN`)                                  |
-| `spectra/lab/jwt-public-key`                        | PEM público de `alias/spectra-jwt` (`aws kms get-public-key`; no es secreto, también vale un parámetro de SSM) | catalog, commerce y audit (`IDENTITY_PUBLIC_KEY_PEM`)                                                       |
-| `spectra/lab/synthetic-admin`                       | `{email, password}` sintéticos                                                                                 | `identity-migrate` (`SYNTHETIC_ADMIN_EMAIL`/`PASSWORD`)                                                     |
+| Secreto                                                     | Contenido                                                                                                      | Lo consume (variable)                                                                                       |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `rds!db-…` (gestionado por RDS)                             | Usuario y contraseña del maestro                                                                               | `db-provision`, `db-finalize` (`PGUSER`, `PGPASSWORD`)                                                      |
+| `spectra/lab/<ciclo>/db/identity-migrator`                  | `{password, url}`                                                                                              | `db-provision` (password); `identity-migrate` (`IDENTITY_DATABASE_URL`)                                     |
+| `spectra/lab/<ciclo>/db/identity-app`                       | `{password, url}`                                                                                              | `db-provision`; identity-service (`IDENTITY_DATABASE_URL`)                                                  |
+| `spectra/lab/<ciclo>/db/catalog-migrator` / `catalog-app`   | ídem                                                                                                           | `db-provision`; `catalog-migrate` / catalog-service (`DATABASE_URL`)                                        |
+| `spectra/lab/<ciclo>/db/commerce-migrator` / `commerce-app` | ídem                                                                                                           | `db-provision`; `commerce-migrate` / commerce-service (`COMMERCE_DATABASE_URL`)                             |
+| `spectra/lab/<ciclo>/db/audit-migrator` / `audit-app`       | ídem                                                                                                           | `db-provision`; `audit-migrate` / audit-service (`AUDIT_DATABASE_URL`)                                      |
+| `spectra/lab/<ciclo>/internal-token`                        | Token de 64 hex                                                                                                | identity, catalog y audit (`SPECTRA_INTERNAL_TOKENS`); catalog, commerce y audit (`SPECTRA_INTERNAL_TOKEN`) |
+| `spectra/lab/<ciclo>/inventory-token`                       | Token de 64 hex, distinto del anterior                                                                         | catalog (`CATALOG_INVENTORY_TOKENS`); commerce (`CATALOG_INVENTORY_TOKEN`)                                  |
+| `spectra/lab/jwt-public-key`                                | PEM público de `alias/spectra-jwt` (`aws kms get-public-key`; no es secreto, también vale un parámetro de SSM) | catalog, commerce y audit (`IDENTITY_PUBLIC_KEY_PEM`)                                                       |
+| `spectra/lab/<ciclo>/synthetic-admin`                       | `{email, password}` sintéticos                                                                                 | `identity-migrate` (`SYNTHETIC_ADMIN_EMAIL`/`PASSWORD`)                                                     |
 
 Formato de URL: `postgresql://spectra_<svc>_<rol>:<hex>@<endpoint-rds>:5432/spectra_shop?schema=<esquema>&sslmode=require&connection_limit=5`. Las variables **no secretas** van en `environment`: `PORT`, `INTERNAL_PORT`, `COOKIE_SECURE=true`, `CORS_ORIGINS=https://<dominio>`, `TRUST_PROXY=10.20.0.0/16` (PR-4), `*_INTERNAL_URL` (Cloud Map) y, en Identity, `IDENTITY_JWT_SIGNER=kms`, `IDENTITY_KMS_KEY_ID=alias/spectra-jwt` y `AWS_REGION`.
 
@@ -266,8 +266,10 @@ aws ecs describe-tasks --cluster spectra-lab --tasks "$TASK" --query 'tasks[0].c
 
 Reglas:
 
-- **Snapshot manual de RDS antes de cada ejecución con migraciones nuevas** (`aws rds create-db-snapshot`).
-- Las migraciones son **solo hacia delante**. Tras DT-08 no hay un downgrade seguro del esquema (cierre operativo M06.0, §6.4): la recuperación es una corrección hacia delante o la restauración del snapshot en una instancia nueva.
+- Regla vigente: [aclaración normativa de snapshots](07-ciclo-laboratorio-efimero.md#11-aclaración-normativa-snapshots-bajo-synthetic-discard).
+- En `lab` **no se crean snapshots manuales**: `synthetic-discard` usa exclusivamente datos regenerables y la
+  CMK que cifra RDS es efímera. Las migraciones son solo hacia delante; ante un fallo se destruye y reconstruye
+  el ciclo desde migraciones y seeds, o se aplica una corrección hacia delante.
 - Las migraciones se ejecutan **antes** de actualizar los servicios, y solo si el nuevo código es compatible con el esquema anterior durante el despliegue rolling.
 - Los servicios no migran al arrancar (DT-09): un reinicio nunca altera el esquema.
 
@@ -276,7 +278,8 @@ Reglas:
 - **Servicios:** `aws ecs update-service --cluster spectra-lab --service <svc> --task-definition <familia>:<revisión>` con `deploymentCircuitBreaker={enable=true,rollback=true}`, `minimumHealthyPercent=100` y `maximumPercent=200`. Orden recomendado: identity → catalog → audit → commerce (de las dependencias a los consumidores).
 - **Rollback de aplicación:** automático por el circuit breaker o manual con `update-service` a la revisión anterior (las imágenes inmutables por SHA lo garantizan).
 - **Rollback de la Web:** el bucket está versionado; se vuelve a sincronizar el build anterior y se invalida `/index.html`.
-- **Rollback de base de datos:** restaurar el snapshot previo en una **instancia nueva**, apuntar los secretos de URL y redesplegar. Requiere autorización y se pierden los datos posteriores al snapshot. El script `rollback-service-roles.sql` necesita su propia variante RDS.
+- **Base de datos de `lab`:** no tiene rollback por snapshot. Los datos son sintéticos y se recuperan mediante
+  reconstrucción reproducible; cualquier política de retención exige una CMK persistente y un ADR separado.
 
 ## 13. Pruebas posteriores al despliegue
 
@@ -371,20 +374,22 @@ for s in commerce catalog audit identity; do aws ecs update-service --cluster sp
 aws rds stop-db-instance --db-instance-identifier spectra-lab-db      # se reinicia sola a los 7 días
 ```
 
-### 16.2 Destrucción completa (orden inverso; preferiblemente `terraform destroy`)
+### 16.2 Destrucción completa mediante plan guardado y validado
 
 1. Servicios ECS a 0 y borrado; deregistrar las task definitions.
 2. CloudFront: deshabilitar, esperar a `Deployed` y borrar. Borrar después la Web ACL de WAF.
 3. ALB, listeners y target groups.
-4. RDS: **decidir** si se guarda un snapshot final (tiene costo de almacenamiento) o se omite con autorización explícita; quitar la protección contra borrado y borrar.
-5. Secrets Manager: borrar (ventana de recuperación de 7–30 días o `--force-delete-without-recovery` con autorización).
-6. ECR: borrar imágenes y repositorios.
+4. RDS: `lab` usa `synthetic-discard`; quitar la protección y borrar sin snapshot final. Un snapshot cifrado con la CMK efímera no es una copia durable.
+5. Secrets Manager: conservar la recuperación configurada de 7–29 días. El borrado forzado está prohibido;
+   el ciclo siguiente usa otro `lab_cycle_id`.
+6. ECR: **no borrar**; pertenece al state persistente `publisher` y conserva las imágenes por SHA.
 7. **VPC endpoints de interfaz** (cobran por hora: no olvidarlos) y el gateway de S3.
 8. Espacio de Cloud Map, log groups y alarmas.
 9. VPC, subredes y security groups.
-10. Bucket S3: vaciar todas las versiones y borrarlo.
-11. KMS: programar el borrado (7–30 días; **verificar** si una clave pendiente de borrado factura).
-12. Roles IAM, OIDC provider (si no se reutiliza) y presupuesto (al final).
+10. Bucket S3 de la SPA: vaciar todas las versiones y borrarlo. Los buckets del state y auditoría pertenecen a `bootstrap` y se conservan.
+11. KMS: programar el borrado (14 días por defecto y siempre al menos un día más que Secrets Manager;
+    **verificar** si una clave pendiente de borrado factura).
+12. Conservar rol OIDC publicador y presupuesto de cuenta: pertenecen a `publisher`/`bootstrap`, no a `lab`.
 
 Verificación final:
 

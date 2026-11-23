@@ -23,6 +23,46 @@ variable "environment" {
   }
 }
 
+variable "lab_cycle_id" {
+  description = "Identificador inmutable de esta creación del laboratorio. Se registra en etiquetas, evidencias y nombres de secretos; cámbielo solo después de destruir por completo el ciclo anterior."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{1,18}[a-z0-9])$", var.lab_cycle_id))
+    error_message = "lab_cycle_id debe tener 3-20 caracteres: minúsculas, números o guiones, y empezar/terminar en carácter alfanumérico."
+  }
+}
+
+variable "lab_data_policy" {
+  description = "Política de datos del laboratorio. Solo synthetic-discard: datos ficticios regenerables y ningún snapshot final cifrado con la CMK efímera."
+  type        = string
+  default     = "synthetic-discard"
+
+  validation {
+    condition     = var.lab_data_policy == "synthetic-discard"
+    error_message = "El entorno lab solo admite lab_data_policy = synthetic-discard. La retención exige diseñar primero una CMK persistente fuera de este state."
+  }
+}
+
+variable "teardown_mode" {
+  description = "Habilita la configuración controlada previa al destroy. No ejecuta ninguna acción por sí sola."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = var.teardown_mode ? (
+      var.service_desired_count == 0 &&
+      !var.db_deletion_protection &&
+      var.spa_bucket_force_destroy &&
+      !var.alb_deletion_protection
+      ) : (
+      var.db_deletion_protection &&
+      !var.spa_bucket_force_destroy
+    )
+    error_message = "teardown_mode=true exige ECS a 0, RDS sin deletion protection, bucket SPA eliminable y ALB sin deletion protection; fuera del apagado se conservan las protecciones de RDS y S3."
+  }
+}
+
 # ---------------------------------------------------------------------------------------------------------
 # Red
 # ---------------------------------------------------------------------------------------------------------
@@ -282,18 +322,6 @@ variable "db_deletion_protection" {
   default     = true
 }
 
-variable "db_skip_final_snapshot" {
-  description = "Omitir el snapshot final al destruir (requiere autorización expresa del propietario)."
-  type        = bool
-  default     = false
-}
-
-variable "db_final_snapshot_identifier" {
-  description = "Nombre del snapshot final (único en la cuenta)."
-  type        = string
-  default     = "spectra-lab-db-final"
-}
-
 variable "db_ca_cert_identifier" {
   description = "CA del certificado del servidor RDS."
   type        = string
@@ -332,20 +360,29 @@ variable "secret_versions" {
 }
 
 variable "secret_recovery_window_days" {
-  description = "Ventana de recuperación de los secretos al destruir (0 o 7-30). Con 7-30, recrear el laboratorio dentro de la ventana choca con los nombres reservados."
+  description = "Ventana de recuperación de los secretos al destruir (7-29). lab_cycle_id evita conflictos de nombre sin reducir esta protección."
   type        = number
   default     = 7
 
   validation {
-    condition     = var.secret_recovery_window_days == 0 || (var.secret_recovery_window_days >= 7 && var.secret_recovery_window_days <= 30)
-    error_message = "secret_recovery_window_days debe ser 0 o estar entre 7 y 30."
+    condition     = var.secret_recovery_window_days >= 7 && var.secret_recovery_window_days <= 29
+    error_message = "secret_recovery_window_days debe estar entre 7 y 29; se reserva al menos un día adicional para la ventana KMS."
   }
 }
 
 variable "kms_deletion_window_days" {
-  description = "Ventana de borrado programado de las claves KMS (7-30)."
+  description = "Ventana de borrado programado de las claves KMS (7-30), al menos un día mayor que la recuperación de los secretos cifrados."
   type        = number
-  default     = 7
+  default     = 14
+
+  validation {
+    condition = (
+      var.kms_deletion_window_days >= 7 &&
+      var.kms_deletion_window_days <= 30 &&
+      var.kms_deletion_window_days >= var.secret_recovery_window_days + 1
+    )
+    error_message = "kms_deletion_window_days debe estar entre 7 y 30 y ser al menos un día mayor que secret_recovery_window_days."
+  }
 }
 
 variable "synthetic_admin_email" {

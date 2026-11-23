@@ -73,11 +73,11 @@ variables {
   master_secret_arn  = "arn:aws:secretsmanager:us-east-1:111122223333:secret:rds!db-master"
   db_role_secret_arns = {
     for r in ["identity-migrator", "identity-app", "catalog-migrator", "catalog-app", "commerce-migrator", "commerce-app", "audit-migrator", "audit-app"] :
-    r => "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/db/${r}"
+    r => "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/20261122-a/db/${r}"
   }
-  internal_token_secret_arn  = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/internal-token"
-  inventory_token_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/inventory-token"
-  synthetic_admin_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/synthetic-admin"
+  internal_token_secret_arn  = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/20261122-a/internal-token"
+  inventory_token_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/20261122-a/inventory-token"
+  synthetic_admin_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/20261122-a/synthetic-admin"
   catalog_seed_demo_products = false
 }
 
