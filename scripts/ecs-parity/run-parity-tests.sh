@@ -250,9 +250,18 @@ nossl=$(awk -F'|' '$2 != "t"' "$OUT/20-positivas/tls-conexiones.txt" | wc -l | t
 roles=$(awk -F'|' '$2 == "t" && $1 ~ /^spectra_.*_app$/ {print $1}' "$OUT/20-positivas/tls-conexiones.txt" | sort -u | wc -l | tr -d ' ')
 rec P-06 "Conexiones TCP de los 4 servicios cifradas" "4 roles *_app con ssl=t; 0 sin TLS" "roles_tls=$roles sin_tls=$nossl" \
   "$([ "$roles" = 4 ] && [ "$nossl" = 0 ] && echo 0 || echo 1)"
-grep -q '^on$' "$OUT/20-positivas/tls-servidor.txt" && ok=0 || ok=1
-rec P-06b "Servidor con ssl=on, TLS ≥ 1.2 y sin registro de sentencias" "on / TLSv1.2 / none / -1" \
-  "$(tr '\n' ' ' < "$OUT/20-positivas/tls-servidor.txt")" $ok
+PG_SETTINGS_REPORT="$OUT/20-positivas/tls-servidor-comprobacion.json"
+$CHECKS pg-settings "$OUT/20-positivas/tls-servidor.txt" > "$PG_SETTINGS_REPORT" || true
+pg_setting_rec() { # id nombre esperado
+  local actual ok
+  actual=$(python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print(next(c["actual"] for c in d["checks"] if c["name"] == sys.argv[2]))' "$PG_SETTINGS_REPORT" "$2" 2>/dev/null || echo ausente)
+  [ "$actual" = "$3" ] && ok=0 || ok=1
+  rec "$1" "PostgreSQL $2" "$3" "$actual" "$ok"
+}
+pg_setting_rec P-06b1 "ssl" "on"
+pg_setting_rec P-06b2 "ssl_min_protocol_version" "TLSv1.2"
+pg_setting_rec P-06b3 "log_statement" "none"
+pg_setting_rec P-06b4 "log_min_duration_statement" "-1"
 
 pg_client() { # descripción esperado(conecta|rechaza) conninfo
   local out rc got

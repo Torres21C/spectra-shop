@@ -19,16 +19,33 @@ from scripts.tests.helpers import load_tool
 parity = load_tool("parity_checks", "scripts/ecs-parity/parity_checks.py")
 
 PORTS = {"identity-service": 3001, "catalog-service": 3002, "commerce-service": 3003, "audit-service": 3004}
-URL = "postgresql://u:p@postgres:5432/db?schema=s&sslmode=require&connection_limit=5"
+SCHEMAS = {name: name.removesuffix("-service") for name in PORTS}
+REFERENCE = parity.terraform_reference(Path(__file__).resolve().parents[2])
+
+
+def database_url(service):
+    schema = SCHEMAS[service]
+    return f"postgresql://spectra_{schema}_app:p@postgres:5432/db?schema={schema}&sslmode=require&connection_limit=5"
 
 
 def valid_config():
     services = {}
     for name, port in PORTS.items():
-        env = {key: "x" for key in parity.ECS_ENV[name] | parity.LOCAL_ONLY_ENV.get(name, set())}
-        env.update({k: v for k, v in parity.EXPECTED_VALUES.items() if k in env})
-        env.update({k: URL for k in parity.DB_URL_KEYS if k in env})
-        env["PORT"] = str(port)
+        env = {key: "value" for key in REFERENCE["env_names"][name] | parity.LOCAL_ONLY_ENV.get(name, set())}
+        env.update(REFERENCE["literal_values"][name])
+        env["CORS_ORIGINS"] = "https://parity.spectra.test"
+        env.update(parity.LOCAL_INTERNAL_URLS.get(name, {}))
+        env[parity.DB_ROLE_KEYS[name]] = database_url(name)
+        if "IDENTITY_PUBLIC_KEY_PEM" in env:
+            env["IDENTITY_PUBLIC_KEY_PEM"] = "-----BEGIN PUBLIC KEY-----\nAA\n-----END PUBLIC KEY-----\n"
+        for key in ("SPECTRA_INTERNAL_TOKEN", "SPECTRA_INTERNAL_TOKENS"):
+            if key in env:
+                env[key] = "internal-token"
+        for key in ("CATALOG_INVENTORY_TOKEN", "CATALOG_INVENTORY_TOKENS"):
+            if key in env:
+                env[key] = "inventory-token"
+        if name == "identity-service":
+            env["IDENTITY_KMS_KEY_ID"] = "arn:aws:kms:us-east-1:111122223333:key/0b3d1f6e-1234-4abc-9def-0123456789ab"
         services[name] = {
             "image": f"spectra-pr7a/{name}-runtime:tag",
             "read_only": True,
@@ -49,7 +66,7 @@ def valid_config():
         env = (
             {"PGSSLMODE": "require", "PGUSER": "rds_master"}
             if job.startswith("postgres-")
-            else {"X_DATABASE_URL": URL.replace("connection_limit=5", "connection_limit=5")}
+            else {"X_DATABASE_URL": database_url("identity-service")}
         )
         services[job] = {"cap_drop": ["ALL"], "init": True, "read_only": False, "platform": "linux/amd64", "environment": env}
     services["postgres"] = {
@@ -158,9 +175,35 @@ class CheckConfigTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assert_detected(lambda s, k=key, v=bad: s["identity-service"]["environment"].update({k: v}), f"{key}=")
 
+    def test_wrong_terraform_literal_value_is_detected(self):
+        self.assert_detected(lambda s: s["catalog-service"]["environment"].update(PORT="9999"), "PORT=3002")
+
+    def test_wrong_selected_internal_url_is_detected(self):
+        self.assert_detected(
+            lambda s: s["commerce-service"]["environment"].update(IDENTITY_INTERNAL_URL="http://wrong:3101"),
+            "IDENTITY_INTERNAL_URL: equivalencia Cloud Map",
+        )
+
+    def test_dynamic_value_shapes_and_relationships_are_detected(self):
+        self.assert_detected(lambda s: s["identity-service"]["environment"].update(CORS_ORIGINS="http://insecure.test"), "CORS_ORIGINS local")
+        self.assert_detected(lambda s: s["identity-service"]["environment"].update(IDENTITY_KMS_KEY_ID="alias/not-an-arn"), "ARN del emulador")
+        self.assert_detected(lambda s: s["audit-service"]["environment"].update(IDENTITY_PUBLIC_KEY_PEM="not-pem"), "formato PEM")
+        self.assert_detected(lambda s: s["commerce-service"]["environment"].update(SPECTRA_INTERNAL_TOKEN="different"), "token interno coherente")
+
+    def test_database_role_schema_and_query_are_detected(self):
+        key = "COMMERCE_DATABASE_URL"
+        self.assert_detected(
+            lambda s: s["commerce-service"]["environment"].update({key: database_url("commerce-service").replace("spectra_commerce_app", "spectra_identity_app")}),
+            "rol, esquema y TLS derivados",
+        )
+        self.assert_detected(
+            lambda s: s["commerce-service"]["environment"].update({key: database_url("commerce-service").replace("connection_limit=5", "connection_limit=9")}),
+            "rol, esquema y TLS derivados",
+        )
+
     def test_database_url_without_tls_is_detected(self):
         self.assert_detected(
-            lambda s: s["commerce-service"]["environment"].update(COMMERCE_DATABASE_URL=URL.replace("sslmode=require", "sslmode=disable")),
+            lambda s: s["commerce-service"]["environment"].update(COMMERCE_DATABASE_URL=database_url("commerce-service").replace("sslmode=require", "sslmode=disable")),
             "COMMERCE_DATABASE_URL",
         )
 
@@ -168,7 +211,7 @@ class CheckConfigTests(unittest.TestCase):
         self.assert_detected(lambda s: s["postgres-provision"]["environment"].update(PGSSLMODE="disable"), "PGSSLMODE=require")
         self.assert_detected(lambda s: s["postgres-finalize"]["environment"].update(PGUSER="postgres"), "rds_master")
         self.assert_detected(
-            lambda s: s["identity-migrate"]["environment"].update(X_DATABASE_URL=URL.replace("sslmode=require", "")), "sslmode=require"
+            lambda s: s["identity-migrate"]["environment"].update(X_DATABASE_URL=database_url("identity-service").replace("sslmode=require", "")), "sslmode=require"
         )
 
     def test_ops_task_capabilities_are_detected(self):
@@ -247,6 +290,23 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(self.quiet(parity.dt09_summary, str(path))[0], 1)
         path.write_text("sin resumen\n", encoding="utf-8")
         self.assertEqual(self.quiet(parity.dt09_summary, str(path))[0], 1)
+
+    def test_pg_settings_rejects_each_incorrect_value(self):
+        path = self.tmp / "settings.txt"
+        expected = [value for _name, value in parity.PG_SETTINGS]
+        path.write_text("\n".join(expected) + "\n", encoding="utf-8")
+        code, out = self.quiet(parity.pg_settings, str(path))
+        self.assertEqual((code, json.loads(out)["passed"]), (0, 4))
+        for index, (name, _value) in enumerate(parity.PG_SETTINGS):
+            with self.subTest(name=name):
+                wrong = expected.copy()
+                wrong[index] = "incorrecto"
+                path.write_text("\n".join(wrong) + "\n", encoding="utf-8")
+                code, out = self.quiet(parity.pg_settings, str(path))
+                report = json.loads(out)
+                self.assertEqual(code, 1)
+                failed = [check["name"] for check in report["checks"] if not check["ok"]]
+                self.assertEqual(failed, [name])
 
 
 if __name__ == "__main__":

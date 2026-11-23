@@ -7,12 +7,12 @@ Comprueba, **sin AWS**, que los cuatro microservicios funcionan con las restricc
 
 ## Archivos
 
-| Archivo                                        | Función                                                                                                                         |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `compose.ecs-parity.yaml`                      | Override que se aplica tras `compose.yaml` y la emulación de RDS (`infra/postgres/rds-emulation/compose.rds-emulation.yaml`)    |
-| `../../scripts/ecs-parity/run-parity-tests.sh` | Genera credenciales y CA efímeras fuera del repositorio, levanta el proyecto y ejecuta las pruebas y la recogida de evidencias  |
-| `../../scripts/ecs-parity/kms-seed.mjs`        | Crea la clave ECC_NIST_P256 de firma de JWT y su alias en el emulador de KMS (solo admite un endpoint local)                    |
-| `../../scripts/ecs-parity/parity_checks.py`    | Compara la configuración renderizada con las task definitions, resume el smoke y DT-09 y redacta los secretos de las evidencias |
+| Archivo                                        | Función                                                                                                                                            |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compose.ecs-parity.yaml`                      | Override que se aplica tras `compose.yaml` y la emulación de RDS (`infra/postgres/rds-emulation/compose.rds-emulation.yaml`)                       |
+| `../../scripts/ecs-parity/run-parity-tests.sh` | Genera credenciales y CA efímeras fuera del repositorio, levanta el proyecto y ejecuta las pruebas y la recogida de evidencias                     |
+| `../../scripts/ecs-parity/kms-seed.mjs`        | Crea la clave ECC_NIST_P256 de firma de JWT y su alias en el emulador de KMS (solo admite un endpoint local)                                       |
+| `../../scripts/ecs-parity/parity_checks.py`    | Deriva de Terraform los atributos verificables, valida controles seleccionados para valores dinámicos, resume smoke/DT-09/P-06b y redacta secretos |
 
 ## Uso
 
@@ -54,6 +54,12 @@ Requisitos: Docker con Compose ≥ 2.24 (`!reset`/`!override`), Node 22+ en el h
 | Cloud Map (`identity.spectra.internal:3101`, …)                | Nombres de servicio de Compose (`identity-service:3101`, …)                      |
 | `CORS_ORIGINS = https://<dominio CloudFront>`                  | `https://parity.spectra.test` (el smoke envía ese `Origin`)                      |
 
+### Alcance del verificador de configuración
+
+`parity_checks.py` lee directamente `infra/terraform/modules/ecs/workloads.tf` y los defaults versionados del entorno `lab` para derivar las claves de entorno, los valores literales de seguridad, la arquitectura y el límite de conexiones. También valida el rol y esquema de cada URL PostgreSQL, la coherencia de tokens efímeros y las equivalencias locales de los nombres internos. Si esa referencia no puede extraerse, la comprobación falla cerrada.
+
+Los siguientes atributos solo admiten una **validación parcial o un control seleccionado** porque Terraform los conoce al planificar/aplicar o porque Compose usa deliberadamente otro sistema de nombres: origen público de CloudFront, DNS de Cloud Map, endpoint y nombre de RDS, ARN y clave pública de KMS, valores de secretos y credenciales obtenidas por el rol de tarea. En local se comprueban su forma segura, coherencia entre servicios y equivalencia Compose, pero no se afirma igualdad con un valor AWS todavía inexistente. IAM, endpoints VPC y valores reales de esos atributos siguen pendientes de C7–C9/P7 en AWS.
+
 ## Diferencias conocidas (no cubiertas por esta prueba)
 
 - **No es Fargate.** El runtime es Docker Desktop con emulación amd64; el perfil seccomp, el kernel y `/dev/shm` pueden diferir. `/dev/shm` es un tmpfs que Docker monta siempre y es escribible incluso con `read_only`: se documenta como ruta escribible conocida.
@@ -82,7 +88,7 @@ Ejecución definitiva `spectra-pr7a-run5` (2026-11-22, 23:49–23:51 UTC) con la
 
 | Grupo                | Resultado                                                                                                                                                                                                                                                                                |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Configuración        | 122/122 comprobaciones de la configuración renderizada frente a las task definitions; el verificador detecta 12/12 mutaciones y tiene 27 pruebas unitarias (`scripts/tests/test_parity_checks.py`)                                                                                       |
+| Configuración        | Run5 histórico: 122/122 comprobaciones, 12/12 mutaciones y 27 pruebas unitarias. La remediación deriva referencias desde Terraform, distingue controles completos/parciales y añade pruebas negativas; su resultado de ejecución se registra por separado en run6                        |
 | Positivas            | 6 tareas de operación con `exitCode=0`; 4 servicios `healthy` en 24 s; `/health` y `/health/ready` 200; smoke E2E 11/11 (con ADMIN, KMS emulado y cookies `Secure`); DT-09 492/492; 4 roles `*_app` conectados con TLSv1.3; 0 errores de permisos                                        |
 | Negativas            | Por servicio: 14 de 16 rutas sin escritura (raíz `ro`), uid 1000, 5 conjuntos de capacidades a 0, 0 binarios setuid/setgid, 5 intentos de escalada rechazados, PID 1 = `docker-init`; `sslmode=disable` y CA ajena rechazados                                                            |
 | Recuperación (local) | Sin PostgreSQL, `/health/ready` 503 y `/health` 200; 65 s sin reinicios de contenedores y healthcheck de contenedor sano; al restaurarlo, `/health/ready` 200 y smoke 11/11; mismo `StartedAt`. **No demuestra** el comportamiento del ALB ni del reemplazo de tareas de ECS (R-PR7A-06) |

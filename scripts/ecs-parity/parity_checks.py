@@ -10,6 +10,7 @@ Subcomandos:
                                   entorno por «***» y comprueba que no queda ninguno (sale con 1 si queda).
   smoke-summary <smoke.json>      resume el informe del smoke (pasos, veredicto) en una línea JSON.
   dt09-summary <log>              extrae la línea resumen del verificador DT-09.
+  pg-settings <salida-show>       valida individualmente ssl, versión TLS y los dos parámetros de log.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 SERVICES = ("identity-service", "catalog-service", "commerce-service", "audit-service")
 JOBS = (
@@ -30,67 +32,121 @@ JOBS = (
     "postgres-finalize",
 )
 
-EDGE = {"COOKIE_SECURE", "CORS_ORIGINS", "TRUST_PROXY"}
-# Variables + secretos de cada task definition (infra/terraform/modules/ecs/workloads.tf).
-ECS_ENV = {
-    "identity-service": EDGE
-    | {
-        "PORT",
-        "INTERNAL_PORT",
-        "IDENTITY_ALLOW_EPHEMERAL_KEYS",
-        "IDENTITY_JWT_SIGNER",
-        "IDENTITY_KMS_KEY_ID",
-        "AWS_REGION",
-        "IDENTITY_DATABASE_URL",
-        "SPECTRA_INTERNAL_TOKENS",
-    },
-    "catalog-service": EDGE
-    | {
-        "PORT",
-        "INTERNAL_PORT",
-        "IDENTITY_INTERNAL_URL",
-        "AUDIT_INTERNAL_URL",
-        "IDENTITY_PUBLIC_KEY_PEM",
-        "DATABASE_URL",
-        "SPECTRA_INTERNAL_TOKENS",
-        "SPECTRA_INTERNAL_TOKEN",
-        "CATALOG_INVENTORY_TOKENS",
-    },
-    "commerce-service": EDGE
-    | {
-        "PORT",
-        "IDENTITY_INTERNAL_URL",
-        "CATALOG_INTERNAL_URL",
-        "IDENTITY_PUBLIC_KEY_PEM",
-        "COMMERCE_DATABASE_URL",
-        "SPECTRA_INTERNAL_TOKEN",
-        "CATALOG_INVENTORY_TOKEN",
-    },
-    "audit-service": EDGE
-    | {
-        "PORT",
-        "INTERNAL_PORT",
-        "IDENTITY_INTERNAL_URL",
-        "IDENTITY_PUBLIC_KEY_PEM",
-        "AUDIT_DATABASE_URL",
-        "SPECTRA_INTERNAL_TOKEN",
-        "SPECTRA_INTERNAL_TOKENS",
-    },
-}
 # Únicas diferencias admitidas: el emulador de KMS (en ECS las credenciales vienen del rol de tarea).
 LOCAL_ONLY_ENV = {
     "identity-service": {"AWS_ENDPOINT_URL_KMS", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"},
 }
-EXPECTED_VALUES = {
-    "COOKIE_SECURE": "true",
-    "TRUST_PROXY": "false",
-    "IDENTITY_ALLOW_EPHEMERAL_KEYS": "false",
-    "IDENTITY_JWT_SIGNER": "kms",
-    "AWS_REGION": "us-east-1",
-}
-DB_URL_KEYS = {"IDENTITY_DATABASE_URL", "DATABASE_URL", "COMMERCE_DATABASE_URL", "AUDIT_DATABASE_URL"}
 ECS_HEALTHCHECK = {("15s", "5s", 3, "30s"), ("15000000000", "5000000000", 3, "30000000000"), (15_000_000_000, 5_000_000_000, 3, 30_000_000_000)}
 SECRET_KEY = re.compile(r"(PASSWORD|TOKEN|SECRET)")
+SERVICE_TF_NAMES = {
+    "identity-service": "identity",
+    "catalog-service": "catalog",
+    "commerce-service": "commerce",
+    "audit-service": "audit",
+}
+SERVICE_SCHEMAS = {name: name.removesuffix("-service") for name in SERVICES}
+DB_ROLE_KEYS = {
+    "identity-service": "IDENTITY_DATABASE_URL",
+    "catalog-service": "DATABASE_URL",
+    "commerce-service": "COMMERCE_DATABASE_URL",
+    "audit-service": "AUDIT_DATABASE_URL",
+}
+LOCAL_INTERNAL_URLS = {
+    "catalog-service": {"IDENTITY_INTERNAL_URL": "http://identity-service:3101", "AUDIT_INTERNAL_URL": "http://audit-service:3104"},
+    "commerce-service": {"IDENTITY_INTERNAL_URL": "http://identity-service:3101", "CATALOG_INTERNAL_URL": "http://catalog-service:3102"},
+    "audit-service": {"IDENTITY_INTERNAL_URL": "http://identity-service:3101"},
+}
+PG_SETTINGS = (
+    ("ssl", "on"),
+    ("ssl_min_protocol_version", "TLSv1.2"),
+    ("log_statement", "none"),
+    ("log_min_duration_statement", "-1"),
+)
+
+
+def _object(text: str, assignment: str) -> str:
+    """Extrae un objeto HCL por balance de llaves; suficiente para los locals versionados que auditamos."""
+    match = re.search(rf"(?m)^\s*{re.escape(assignment)}\s*=\s*\{{", text)
+    if not match:
+        raise ValueError(f"no se encontró el objeto Terraform {assignment}")
+    start = text.find("{", match.start())
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : index]
+    raise ValueError(f"objeto Terraform sin cerrar: {assignment}")
+
+
+def _names(block: str) -> set[str]:
+    return set(re.findall(r'(?m)^\s*([A-Z][A-Z0-9_]*)\s*=', block))
+
+
+def _literals(block: str) -> dict[str, str]:
+    return dict(re.findall(r'(?m)^\s*([A-Z][A-Z0-9_]*)\s*=\s*"([^"]*)"', block))
+
+
+def _merged_object(block: str, assignment: str) -> str:
+    match = re.search(rf"(?m)^\s*{re.escape(assignment)}\s*=\s*merge\([^,]+,\s*\{{", block)
+    if not match:
+        raise ValueError(f"no se encontró el objeto merge Terraform {assignment}")
+    synthetic = f"{assignment} = " + block[block.rfind("{", match.start(), match.end()) :]
+    return _object(synthetic, assignment)
+
+
+def _variable_default(text: str, name: str) -> str:
+    match = re.search(rf'(?m)^\s*variable\s+"{re.escape(name)}"\s*\{{', text)
+    if not match:
+        raise ValueError(f"no se encontró la variable Terraform {name}")
+    synthetic = f"variable_{name} = " + text[text.find("{", match.start()) :]
+    block = _object(synthetic, f"variable_{name}")
+    match = re.search(r'(?m)^\s*default\s*=\s*"?([^"\s]+)"?\s*$', block)
+    if not match:
+        raise ValueError(f"variable Terraform sin default literal: {name}")
+    return match.group(1)
+
+
+def terraform_reference(repo: Path) -> dict:
+    """Deriva claves y literales auditables del Terraform local, sin plan, provider ni AWS."""
+    workloads = (repo / "infra/terraform/modules/ecs/workloads.tf").read_text(encoding="utf-8")
+    variables = (repo / "infra/terraform/environments/lab/variables.tf").read_text(encoding="utf-8")
+    services = _object(workloads, "services")
+    edge = _object(workloads, "edge_environment")
+    edge_names = _names(edge)
+    edge_literals = _literals(edge)
+    env_names = {}
+    literal_values = {}
+    for compose_name, terraform_name in SERVICE_TF_NAMES.items():
+        service = _object(services, terraform_name)
+        environment = _merged_object(service, "environment")
+        secrets = _object(service, "secrets")
+        env_names[compose_name] = edge_names | _names(environment) | _names(secrets)
+        literal_values[compose_name] = edge_literals | _literals(environment)
+    literal_values["identity-service"]["AWS_REGION"] = _variable_default(variables, "aws_region")
+    for name in SERVICES:
+        literal_values[name]["TRUST_PROXY"] = _variable_default(variables, "trust_proxy")
+    return {
+        "env_names": env_names,
+        "literal_values": literal_values,
+        "cpu_architecture": _variable_default(variables, "cpu_architecture"),
+        "connection_limit": _variable_default(variables, "db_connection_limit"),
+    }
 
 
 def _env(service: dict) -> dict:
@@ -104,6 +160,12 @@ def check_config(path: str) -> int:
     config = json.loads(Path(path).read_text(encoding="utf-8"))
     services = config.get("services", {})
     checks: list[dict] = []
+    repo = Path(__file__).resolve().parents[2]
+    try:
+        reference = terraform_reference(repo)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"error": f"no se pudo derivar la referencia Terraform: {exc}"}, ensure_ascii=False))
+        return 1
 
     def record(target: str, check: str, ok: bool, detail: object = None) -> None:
         checks.append({"target": target, "check": check, "ok": bool(ok), "detail": detail})
@@ -122,7 +184,8 @@ def check_config(path: str) -> int:
         record(name, "sin volúmenes", not svc.get("volumes"), [v.get("target") for v in svc.get("volumes") or []])
         record(name, "sin tmpfs (Fargate no lo admite)", not svc.get("tmpfs"))
         record(name, "sin security_opt que relaje el perfil", not svc.get("security_opt"), svc.get("security_opt"))
-        record(name, "platform=linux/amd64 (X86_64)", svc.get("platform") == "linux/amd64", svc.get("platform"))
+        expected_platform = {"X86_64": "linux/amd64", "ARM64": "linux/arm64"}.get(reference["cpu_architecture"])
+        record(name, f"platform={expected_platform} ({reference['cpu_architecture']} derivado de Terraform)", svc.get("platform") == expected_platform, svc.get("platform"))
         record(name, "sin build (imagen de la CI)", "build" not in svc)
         record(name, "pull_policy=never", svc.get("pull_policy") == "never")
         hc = svc.get("healthcheck") or {}
@@ -135,7 +198,7 @@ def check_config(path: str) -> int:
             "healthcheck = GET /health en su puerto (como la task definition)",
             f"http://127.0.0.1:{env.get('PORT')}/health'" in probe,
         )
-        expected = ECS_ENV[name] | LOCAL_ONLY_ENV.get(name, set())
+        expected = reference["env_names"][name] | LOCAL_ONLY_ENV.get(name, set())
         keys = set(env)
         record(
             name,
@@ -143,16 +206,69 @@ def check_config(path: str) -> int:
             keys == expected,
             {"faltan": sorted(expected - keys), "sobran": sorted(keys - expected)},
         )
-        for key, value in EXPECTED_VALUES.items():
-            if key in env:
-                record(name, f"{key}={value}", env[key] == value)
-        for key in DB_URL_KEYS & keys:
-            url = env[key]
+        for key, value in reference["literal_values"][name].items():
+            record(name, f"{key}={value} (derivado de Terraform)", env.get(key) == value)
+        record(
+            name,
+            "CORS_ORIGINS local: mismo origen HTTPS (parcial; Terraform lo obtiene de CloudFront)",
+            bool(env.get("CORS_ORIGINS")) and str(env["CORS_ORIGINS"]).startswith("https://"),
+        )
+        for key, value in LOCAL_INTERNAL_URLS.get(name, {}).items():
             record(
                 name,
-                f"{key}: sslmode=require&connection_limit=5",
-                "sslmode=require" in url and "connection_limit=5" in url and "@postgres:5432/" in url,
+                f"{key}: equivalencia Cloud Map → nombre Compose (control seleccionado)",
+                env.get(key) == value,
             )
+        db_key = DB_ROLE_KEYS[name]
+        parsed = urlparse(str(env.get(db_key, "")))
+        query = parse_qs(parsed.query)
+        schema = SERVICE_SCHEMAS[name]
+        record(
+            name,
+            f"{db_key}: rol, esquema y TLS derivados de Terraform",
+            parsed.scheme == "postgresql"
+            and parsed.hostname == "postgres"
+            and parsed.port == 5432
+            and parsed.username == f"spectra_{schema}_app"
+            and query.get("schema") == [schema]
+            and query.get("sslmode") == ["require"]
+            and query.get("connection_limit") == [reference["connection_limit"]],
+        )
+
+    cors = {_env(services.get(name, {})).get("CORS_ORIGINS") for name in SERVICES}
+    record("servicios", "CORS_ORIGINS idéntico en los 4 servicios", len(cors) == 1 and None not in cors)
+    identity_env = _env(services.get("identity-service", {}))
+    record(
+        "identity-service",
+        "IDENTITY_KMS_KEY_ID = ARN del emulador local (parcial; ARN AWS solo se conoce al desplegar)",
+        bool(re.fullmatch(r"arn:aws:kms:us-east-1:111122223333:key/[0-9a-f-]{36}", str(identity_env.get("IDENTITY_KMS_KEY_ID", "")))),
+    )
+    for name in ("catalog-service", "commerce-service", "audit-service"):
+        pem = str(_env(services.get(name, {})).get("IDENTITY_PUBLIC_KEY_PEM", ""))
+        record(
+            name,
+            "IDENTITY_PUBLIC_KEY_PEM con formato PEM (parcial; valor AWS solo se conoce al desplegar)",
+            pem.startswith("-----BEGIN PUBLIC KEY-----") and pem.rstrip().endswith("-----END PUBLIC KEY-----"),
+        )
+    token_env = {name: _env(services.get(name, {})) for name in SERVICES}
+    internal_tokens = [
+        token_env["identity-service"].get("SPECTRA_INTERNAL_TOKENS"),
+        token_env["catalog-service"].get("SPECTRA_INTERNAL_TOKENS"),
+        token_env["catalog-service"].get("SPECTRA_INTERNAL_TOKEN"),
+        token_env["commerce-service"].get("SPECTRA_INTERNAL_TOKEN"),
+        token_env["audit-service"].get("SPECTRA_INTERNAL_TOKEN"),
+        token_env["audit-service"].get("SPECTRA_INTERNAL_TOKENS"),
+    ]
+    inventory_tokens = [
+        token_env["catalog-service"].get("CATALOG_INVENTORY_TOKENS"),
+        token_env["commerce-service"].get("CATALOG_INVENTORY_TOKEN"),
+    ]
+    record("servicios", "token interno coherente y no vacío (valor efímero, no se registra)", bool(internal_tokens[0]) and len(set(internal_tokens)) == 1)
+    record(
+        "servicios",
+        "token de inventario coherente, no vacío y distinto del interno (valor efímero)",
+        bool(inventory_tokens[0]) and len(set(inventory_tokens)) == 1 and inventory_tokens[0] != internal_tokens[0],
+    )
 
     for name in JOBS:
         svc = services.get(name)
@@ -162,7 +278,8 @@ def check_config(path: str) -> int:
         record(name, "cap_drop=[ALL]", svc.get("cap_drop") == ["ALL"], svc.get("cap_drop"))
         record(name, "init=true", svc.get("init") is True)
         record(name, "read_only=false (como readonlyRootFilesystem=false en ECS)", svc.get("read_only") in (False, None))
-        record(name, "platform=linux/amd64", svc.get("platform") == "linux/amd64")
+        expected_platform = {"X86_64": "linux/amd64", "ARM64": "linux/arm64"}.get(reference["cpu_architecture"])
+        record(name, f"platform={expected_platform} (derivado de Terraform)", svc.get("platform") == expected_platform)
         record(name, "sin build (imagen de la CI)", "build" not in svc)
         env = _env(svc)
         if name.startswith("postgres-"):
@@ -279,6 +396,18 @@ def dt09_summary(path: str) -> int:
     return 1
 
 
+def pg_settings(path: str) -> int:
+    """Valida cada valor devuelto por los cuatro SHOW de PostgreSQL usados por P-06b."""
+    values = [line.strip() for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    checks = []
+    for index, (name, expected) in enumerate(PG_SETTINGS):
+        actual = values[index] if index < len(values) else None
+        checks.append({"name": name, "expected": expected, "actual": actual, "ok": actual == expected})
+    failed = [check for check in checks if not check["ok"]]
+    print(json.dumps({"total": len(checks), "passed": len(checks) - len(failed), "failed": len(failed), "checks": checks}, ensure_ascii=False))
+    return 1 if failed else 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -290,6 +419,7 @@ def main(argv: list[str]) -> int:
         "redact": (redact, 2),
         "smoke-summary": (smoke_summary, 1),
         "dt09-summary": (dt09_summary, 1),
+        "pg-settings": (pg_settings, 1),
     }
     if command not in handlers or len(args) != handlers[command][1]:
         print(__doc__, file=sys.stderr)
