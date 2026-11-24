@@ -6,6 +6,9 @@
 # y rotación, solo TLS, bloqueo nativo de S3 (`use_lockfile`) y protección contra destrucción accidental.
 # PR-6.2: auditoría de los accesos al state con CloudTrail (audit.tf, R-PR5-26) y presupuesto de la cuenta
 # antes del primer recurso facturable (budget.tf, D7).
+#
+# Orden de creación (D7): presupuesto → clave KMS → buckets → resto. Los `depends_on` de la clave y de los dos
+# buckets lo garantizan en un solo apply, sin -target; lo comprueba scripts/check_state_ownership.py.
 
 data "aws_caller_identity" "current" {}
 
@@ -87,6 +90,9 @@ resource "aws_kms_key" "state" {
   lifecycle {
     prevent_destroy = true
   }
+
+  # D7: sin presupuesto no se crea ningún recurso facturable.
+  depends_on = [aws_budgets_budget.account]
 }
 
 resource "aws_kms_alias" "state" {
@@ -103,6 +109,9 @@ resource "aws_s3_bucket" "state" {
   lifecycle {
     prevent_destroy = true
   }
+
+  # D7: después de la clave (y del presupuesto); si la clave falla, no quedan buckets a medias.
+  depends_on = [aws_kms_key.state]
 }
 
 resource "aws_s3_bucket_public_access_block" "state" {

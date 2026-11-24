@@ -1,5 +1,6 @@
 # Presupuesto mensual de la CUENTA (PR-6.2, D7; ADR-AWS-05 D-AWS-05-21). Se crea en el bootstrap porque es la
-# primera raíz que se aplica: así existe antes de cualquier recurso facturable (KMS, ECR y laboratorio).
+# primera raíz que se aplica: así existe antes de cualquier recurso facturable (KMS, ECR y laboratorio). Dentro
+# del bootstrap, la clave KMS lo espera con `depends_on` y todo lo demás espera a la clave (main.tf, audit.tf).
 #
 # Es solo un AVISO por correo: AWS Budgets no detiene ni limita el gasto (no hay acciones configuradas), y
 # sus datos llegan con retraso (hasta unas horas). Independiente del presupuesto del laboratorio
