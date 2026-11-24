@@ -12,6 +12,23 @@ resource "aws_budgets_budget" "account" {
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
+  # Mide el consumo antes de créditos y reembolsos: si se descontaran, el gasto neto podría quedar en 0 y los
+  # avisos no llegarían mientras se agotan los créditos. El resto son los valores por defecto de AWS, explícitos
+  # para que no dependan de cómo complete el proveedor un bloque parcial.
+  cost_types {
+    include_credit             = false
+    include_refund             = false
+    include_discount           = true
+    include_other_subscription = true
+    include_recurring          = true
+    include_subscription       = true
+    include_support            = true
+    include_tax                = true
+    include_upfront            = true
+    use_amortized              = false
+    use_blended                = false
+  }
+
   dynamic "notification" {
     for_each = toset(var.budget_alert_percentages)
 
