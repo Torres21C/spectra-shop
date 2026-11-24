@@ -84,6 +84,61 @@ run "state_bucket_keeps_its_controls" {
     ])
     error_message = "La política del bucket del state deniega el acceso sin TLS y las subidas sin SSE-KMS."
   }
+
+  assert {
+    condition     = alltrue([for r in aws_s3_bucket_server_side_encryption_configuration.state.rule : r.bucket_key_enabled])
+    error_message = "El bucket del state conserva S3 Bucket Key (CloudTrail no escribe en él)."
+  }
+}
+
+run "state_bucket_denies_other_principals_including_versions" {
+  command = plan
+
+  variables {
+    state_admin_role_arns = [
+      "arn:aws:iam::111122223333:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_spectra-publisher-deployer_*",
+      "arn:aws:iam::111122223333:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_spectra-lab-deployer_*",
+    ]
+  }
+
+  override_resource {
+    target          = aws_s3_bucket.state
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::spectra-tfstate-111122223333-us-east-1"
+      id  = "spectra-tfstate-111122223333-us-east-1"
+    }
+  }
+
+  assert {
+    # Lista exacta: ni se pierde una acción ni se deniegan otras (ListBucket y la configuración del bucket).
+    condition = one([for s in data.aws_iam_policy_document.state_bucket.statement : toset(s.actions) if s.sid == "DenyOtherPrincipals"]) == toset([
+      "s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion",
+    ])
+    error_message = "Otros principales no leen, escriben ni borran objetos del state ni sus versiones."
+  }
+
+  assert {
+    condition = alltrue([for s in data.aws_iam_policy_document.state_bucket.statement : (
+      s.effect == "Deny"
+      && toset(s.resources) == toset(["arn:aws:s3:::spectra-tfstate-111122223333-us-east-1/*"])
+      && anytrue([for p in s.principals : p.type == "*" && toset(p.identifiers) == toset(["*"])])
+    ) if s.sid == "DenyOtherPrincipals"])
+    error_message = "La denegación se aplica a todos los principales y solo a los objetos del bucket del state."
+  }
+
+  assert {
+    condition = alltrue([for s in data.aws_iam_policy_document.state_bucket.statement : (
+      length(s.condition) == 1 && one(s.condition).test == "ArnNotLike" && one(s.condition).variable == "aws:PrincipalArn"
+      && toset(one(s.condition).values) == toset(var.state_admin_role_arns)
+    ) if s.sid == "DenyOtherPrincipals"])
+    error_message = "Solo los roles de state_admin_role_arns quedan exceptuados (backend de publisher y lab)."
+  }
+
+  assert {
+    condition     = length([for s in data.aws_iam_policy_document.state_bucket.statement : s if s.effect != "Deny"]) == 0
+    error_message = "La política del bucket del state no concede acceso a nadie: solo deniega."
+  }
 }
 
 run "audit_trail_scope_is_only_the_state_bucket" {
@@ -187,6 +242,11 @@ run "audit_bucket_is_private_retained_and_undeletable" {
   }
 
   assert {
+    condition     = alltrue([for r in aws_s3_bucket_server_side_encryption_configuration.audit.rule : r.bucket_key_enabled == false])
+    error_message = "Sin S3 Bucket Key en el bucket de auditoría: AWS documenta que entonces crear el trail exige kms:Decrypt (D5: solo cifra)."
+  }
+
+  assert {
     condition = alltrue([for r in aws_s3_bucket_lifecycle_configuration.audit.rule : (
       r.status == "Enabled" && one(r.expiration).days == 365 && one(r.noncurrent_version_expiration).noncurrent_days == 365
     )])
@@ -260,6 +320,29 @@ run "account_budget_exists_before_billable_resources" {
   assert {
     condition     = length(aws_budgets_budget.account.notification) == 3 && alltrue([for n in aws_budgets_budget.account.notification : toset(n.subscriber_email_addresses) == toset(["owner@example.invalid"])])
     error_message = "D7: avisos al 50 % y 100 % del gasto real y al 100 % del pronóstico, a los destinatarios configurados."
+  }
+
+  assert {
+    condition = (
+      one(aws_budgets_budget.account.cost_types).include_credit == false
+      && one(aws_budgets_budget.account.cost_types).include_refund == false
+    )
+    error_message = "D7: el presupuesto no descuenta créditos ni reembolsos (avisaría tarde o nunca)."
+  }
+
+  assert {
+    condition = alltrue([
+      one(aws_budgets_budget.account.cost_types).include_discount,
+      one(aws_budgets_budget.account.cost_types).include_other_subscription,
+      one(aws_budgets_budget.account.cost_types).include_recurring,
+      one(aws_budgets_budget.account.cost_types).include_subscription,
+      one(aws_budgets_budget.account.cost_types).include_support,
+      one(aws_budgets_budget.account.cost_types).include_tax,
+      one(aws_budgets_budget.account.cost_types).include_upfront,
+      !one(aws_budgets_budget.account.cost_types).use_amortized,
+      !one(aws_budgets_budget.account.cost_types).use_blended,
+    ])
+    error_message = "D7: el resto de los tipos de costo conserva los valores por defecto de AWS."
   }
 }
 

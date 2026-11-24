@@ -64,7 +64,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "audit" {
       sse_algorithm     = "aws:kms"
       kms_master_key_id = aws_kms_key.state.arn
     }
-    bucket_key_enabled = true
+    bucket_key_enabled = false # AWS documenta que, con Bucket Key, crear el trail exige kms:Decrypt (D5: solo cifra).
   }
 }
 
