@@ -2,7 +2,8 @@
 # no usa credenciales ni contacta con AWS. Solo `command = plan`. Comprueba que el bucket del state conserva
 # sus controles y que el trail registra SOLO los objetos del bucket del state, cifrado con la CMK del state,
 # con validación de integridad, retención de 365 días y sin poder borrar versiones de los registros.
-# `prevent_destroy` no se puede evaluar en un plan: lo comprueba scripts/check_state_ownership.py.
+# `prevent_destroy` y `depends_on` (orden de D7) no se pueden evaluar en un plan: los comprueba
+# scripts/check_state_ownership.py.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {

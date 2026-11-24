@@ -24,7 +24,7 @@ infra/terraform/
   scripts/ci/                           envoltorio de Terraform (bloquea apply/destroy) y Checkov fijado
   scripts/verify-routes.py              rutas de CloudFront/ALB frente a los controladores reales
   scripts/checkov-exceptions-doc.py     genera y comprueba docs/07 desde los comentarios checkov:skip
-  scripts/check_state_ownership.py      propiedad exclusiva de los recursos entre las tres raíces (PR-6.2)
+  scripts/check_state_ownership.py      propiedad exclusiva de los recursos entre las tres raíces (PR-6.2) y orden de D7 en bootstrap
   bootstrap/                            state (S3 + KMS), auditoría CloudTrail y presupuesto de la cuenta
   publisher/                            repositorios ECR y rol OIDC publicador (PR-6.2; state propio)
   modules/

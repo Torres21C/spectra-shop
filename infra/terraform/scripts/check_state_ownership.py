@@ -11,7 +11,10 @@ Analiza el código (sin Terraform, sin red ni AWS) siguiendo las llamadas a mód
   - lab vuelve a declarar las variables del publicador (podría habilitarse desde lab) o deja de leer los
     repositorios con data "aws_ecr_repository";
   - publisher y lab no declaran los mismos 5 repositorios, o publisher usa una CMK para ECR (D2);
-  - falta prevent_destroy en el bucket y la clave del state o en el bucket de auditoría.
+  - falta prevent_destroy en el bucket y la clave del state o en el bucket de auditoría;
+  - el bootstrap no garantiza el orden de D7 (presupuesto → clave KMS → buckets → resto): todo recurso debe
+    depender del presupuesto, y todo recurso salvo el presupuesto y la clave debe depender de la clave; los
+    tres depends_on directos deben existir y las dependencias no pueden formar ciclos.
 
 Uso: python3 -I scripts/check_state_ownership.py [directorio infra/terraform]
 Compatible con Python 3.9; solo biblioteca estándar.
@@ -56,6 +59,10 @@ LAB_FORBIDDEN_VARIABLES = {
 
 PREVENT_DESTROY = [("bootstrap", "aws_kms_key", "state"), ("bootstrap", "aws_s3_bucket", "state"),
                    ("bootstrap", "aws_s3_bucket", "audit")]
+
+# D7: orden de creación del bootstrap. Cada par exige un depends_on directo en el recurso.
+BUDGET, STATE_KEY = "aws_budgets_budget.account", "aws_kms_key.state"
+ORDER_DEPENDS_ON = [(STATE_KEY, BUDGET), ("aws_s3_bucket.state", STATE_KEY), ("aws_s3_bucket.audit", STATE_KEY)]
 
 BLOCK_RE = re.compile(r'^[ \t]*(resource|data|module|variable)[ \t]+"([^"]+)"(?:[ \t]+"([^"]+)")?[ \t]*\{', re.M)
 
@@ -155,6 +162,39 @@ def collect(tf_root: Path, rel_dir: str) -> dict:
     return found
 
 
+def references_only(body: str) -> str:
+    """Sustituye cada cadena por sus interpolaciones: un nombre de recurso dentro de un texto no es dependencia."""
+    return re.sub(r'"((?:[^"\\]|\\.)*)"', lambda m: " ".join(re.findall(r'\$\{([^}]*)\}', m.group(1))), body)
+
+
+def explicit_depends_on(body: str) -> set[str]:
+    m = re.search(r'^[ \t]*depends_on[ \t]*=[ \t]*\[([^\]]*)\]', body, re.M)
+    return {ref.strip() for ref in m.group(1).split(",") if ref.strip()} if m else set()
+
+
+def dependency_graph(blocks: list[dict]) -> dict[str, set[str]]:
+    """Dependencias directas (referencias y depends_on) entre los recursos y data sources de una raíz sin módulos.
+
+    Las dependencias que pasan por un `local` no se cuentan: la comprobación solo puede ser más estricta que
+    Terraform. Los ciclos que pasan por un `local` los detecta `terraform validate`.
+    """
+    nodes = {("data." if b["kind"] == "data" else "") + f"{b['type']}.{b['name']}": references_only(b["body"])
+             for b in blocks if b["kind"] in ("resource", "data")}
+    return {address: {other for other in nodes
+                      if re.search(r'(?<![\w.-])' + re.escape(other) + r'(?![\w-])', body)}
+            for address, body in nodes.items()}
+
+
+def reachable(graph: dict[str, set[str]], start: str) -> set[str]:
+    seen, pending = set(), list(graph.get(start, ()))
+    while pending:
+        node = pending.pop()
+        if node not in seen:
+            seen.add(node)
+            pending.extend(graph.get(node, ()))
+    return seen
+
+
 def repositories(blocks: list[dict]) -> list[str] | None:
     for blk in blocks:
         if blk["file"].name == "main.tf":
@@ -162,6 +202,28 @@ def repositories(blocks: list[dict]) -> list[str] | None:
             if m:
                 return re.findall(r'"([^"]+)"', m.group(1))
     return None
+
+
+def check_bootstrap_order(bootstrap: dict) -> list[str]:
+    """D7: presupuesto → clave KMS → buckets → resto, garantizado por las dependencias del código."""
+    errors = []
+    graph = dependency_graph(bootstrap["blocks"])
+    bodies = {address: blk["body"] for _, address, blk in bootstrap["resources"]}
+    for address, required in ORDER_DEPENDS_ON:
+        if required not in explicit_depends_on(bodies.get(address, "")):
+            errors.append(f"bootstrap: D7: {address} debe declarar depends_on = [{required}]")
+    if re.search(r'^ {0,2}(count|for_each)\s*=', bodies.get(BUDGET, ""), re.M):
+        errors.append(f"bootstrap: D7: {BUDGET} no puede ser condicional (count o for_each)")
+    for address in sorted(graph):
+        if address in reachable(graph, address):
+            errors.append(f"bootstrap: D7: {address} forma parte de un ciclo de dependencias")
+    for address in sorted(bodies):
+        dependencies = reachable(graph, address)
+        if address != BUDGET and BUDGET not in dependencies:
+            errors.append(f"bootstrap: D7: {address} podría crearse antes que el presupuesto ({BUDGET})")
+        if address not in (BUDGET, STATE_KEY) and STATE_KEY not in dependencies:
+            errors.append(f"bootstrap: D7: {address} podría crearse antes que la clave ({STATE_KEY})")
+    return errors
 
 
 def analyze(tf_root: Path) -> tuple[list[str], dict]:
@@ -219,6 +281,8 @@ def analyze(tf_root: Path) -> tuple[list[str], dict]:
         if not matches or not re.search(r'prevent_destroy\s*=\s*true', matches[0]["body"]):
             errors.append(f"{root}: {rtype}.{rname} debe tener lifecycle {{ prevent_destroy = true }}")
 
+    errors += check_bootstrap_order(roots["bootstrap"])
+
     summary = {name: sorted({t for t, _, _ in data["resources"]}) for name, data in roots.items()}
     counts = {name: len(data["resources"]) for name, data in roots.items()}
     return errors, {"types": summary, "blocks": counts}
@@ -234,7 +298,8 @@ def main(argv: list[str]) -> int:
             print("FAIL", e)
         return 1
     print("OK   propiedad de los recursos: publisher solo ECR y rol OIDC; ningún recurso en dos states; "
-          "sin terraform_remote_state; prevent_destroy en el state y su auditoría")
+          "sin terraform_remote_state; prevent_destroy en el state y su auditoría; "
+          "orden de D7 en el bootstrap (presupuesto → clave → buckets → resto)")
     return 0
 
 

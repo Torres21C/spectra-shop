@@ -29,6 +29,9 @@ resource "aws_s3_bucket" "audit" {
   lifecycle {
     prevent_destroy = true
   }
+
+  # D7: después de la clave (y del presupuesto); si la clave falla, no quedan buckets a medias.
+  depends_on = [aws_kms_key.state]
 }
 
 resource "aws_s3_bucket_public_access_block" "audit" {

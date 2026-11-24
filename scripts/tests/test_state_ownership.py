@@ -120,6 +120,69 @@ class StateOwnershipTests(unittest.TestCase):
                      'enable_key_rotation     = true\n  deletion_window_in_days = 30\n  policy                  = data.aws_iam_policy_document.state_key.json\n\n  lifecycle {\n    prevent_destroy = false')
         self.assertFails("aws_kms_key.state debe tener lifecycle")
 
+    # D7: presupuesto → clave KMS → buckets → resto ------------------------------------------------
+
+    KEY_WAITS = "  depends_on = [aws_budgets_budget.account]\n"
+    BUCKET_WAITS = "  depends_on = [aws_kms_key.state]\n"
+
+    def test_bootstrap_order_covers_every_resource(self):
+        graph = ownership.dependency_graph(ownership.collect(TF, "bootstrap")["blocks"])
+        resources = {address for address in graph if not address.startswith("data.")}
+        self.assertEqual(len(resources), 18)
+        self.assertEqual(ownership.reachable(graph, ownership.BUDGET), set())
+        waits_budget = {a for a in resources if ownership.BUDGET in ownership.reachable(graph, a)}
+        waits_key = {a for a in resources if ownership.STATE_KEY in ownership.reachable(graph, a)}
+        self.assertEqual(waits_budget, resources - {ownership.BUDGET})
+        self.assertEqual(waits_key, resources - {ownership.BUDGET, ownership.STATE_KEY})
+
+    def test_key_must_wait_for_budget(self):
+        self.replace("bootstrap/main.tf", self.KEY_WAITS, "")
+        self.assertFails("D7: aws_kms_key.state debe declarar depends_on = [aws_budgets_budget.account]")
+        # Sin ese eslabón, todo lo demás también podría crearse antes que el presupuesto.
+        self.assertFails("D7: aws_cloudtrail.state_audit podría crearse antes que el presupuesto")
+        self.assertFails("D7: aws_s3_bucket.state podría crearse antes que el presupuesto")
+
+    def test_commented_dependency_does_not_count(self):
+        self.replace("bootstrap/main.tf", self.KEY_WAITS, "  # depends_on = [aws_budgets_budget.account]\n")
+        self.assertFails("D7: aws_kms_key.state debe declarar depends_on")
+
+    def test_dependency_named_inside_a_string_does_not_count(self):
+        self.replace("bootstrap/main.tf", self.KEY_WAITS, '  description2 = "aws_budgets_budget.account"\n')
+        self.assertFails("D7: aws_kms_key.state podría crearse antes que el presupuesto")
+
+    def test_state_bucket_must_wait_for_key(self):
+        self.replace("bootstrap/main.tf", self.BUCKET_WAITS, "")
+        self.assertFails("D7: aws_s3_bucket.state debe declarar depends_on = [aws_kms_key.state]")
+        self.assertFails("D7: aws_s3_bucket_versioning.state podría crearse antes que la clave")
+
+    def test_audit_bucket_must_wait_for_key(self):
+        self.replace("bootstrap/audit.tf", self.BUCKET_WAITS, "")
+        self.assertFails("D7: aws_s3_bucket.audit debe declarar depends_on = [aws_kms_key.state]")
+        self.assertFails("D7: aws_s3_bucket_policy.audit podría crearse antes que la clave")
+
+    def test_bucket_waiting_only_for_budget_is_not_enough(self):
+        self.replace("bootstrap/audit.tf", self.BUCKET_WAITS, self.KEY_WAITS)
+        self.assertFails("D7: aws_s3_bucket.audit podría crearse antes que la clave")
+
+    def test_new_resource_without_order_is_rejected(self):
+        self.append("bootstrap/main.tf", 'resource "aws_s3_bucket" "nuevo" {\n  bucket = "x"\n}')
+        self.assertFails("D7: aws_s3_bucket.nuevo podría crearse antes que el presupuesto")
+
+    def test_dependency_cycle_is_rejected(self):
+        self.replace("bootstrap/budget.tf", '  time_unit    = "MONTHLY"\n',
+                     '  time_unit    = "MONTHLY"\n  depends_on   = [aws_s3_bucket.state]\n')
+        self.assertFails("D7: aws_budgets_budget.account forma parte de un ciclo")
+
+    def test_budget_cannot_be_conditional(self):
+        self.replace("bootstrap/budget.tf", '  budget_type  = "COST"\n', '  count        = 0\n  budget_type  = "COST"\n')
+        self.assertFails("D7: aws_budgets_budget.account no puede ser condicional")
+
+    def test_budget_cannot_be_removed(self):
+        self.replace("bootstrap/budget.tf", 'resource "aws_budgets_budget" "account" {', "locals {")
+        self.assertFails("podría crearse antes que el presupuesto")
+
+    # ----------------------------------------------------------------------------------------------
+
     def test_bootstrap_cannot_create_other_resources(self):
         self.append("bootstrap/main.tf", 'resource "aws_iam_role" "x" {\n  name = "x"\n}')
         self.assertFails("bootstrap: recurso no permitido en esta raíz: aws_iam_role.x")
