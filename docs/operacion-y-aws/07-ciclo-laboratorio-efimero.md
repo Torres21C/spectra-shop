@@ -15,6 +15,11 @@ Este runbook prepara el procedimiento; no autoriza llamadas AWS ni operaciones T
   a 7 días por defecto). Es un margen operativo, no una garantía de recuperación automática.
 - Ningún `apply` se ejecuta sin un plan guardado validado por `lab_teardown_guard.py` (§3.0); el guard rechaza
   cambiar `lab_cycle_id` sobre un state activo también en despliegues y actualizaciones normales.
+- Los 12 roles del state `lab` deben llevar la boundary preexistente `spectra-lab-runtime-boundary`. La raíz
+  exige su ARN por variable; no puede omitirse ni apuntar a otro nombre. La boundary y los permission sets de
+  Identity Center no pertenecen a este state y no se crean automáticamente.
+- No hay dominio propio: se mantienen `domain_name`, `acm_certificate_arn` y `route53_zone_id` en `null` para
+  usar el dominio y TLS predeterminados de CloudFront. Presupuesto mensual: USD 50.
 
 ### 1.1 Aclaración normativa: snapshots bajo `synthetic-discard`
 
@@ -37,21 +42,56 @@ modifican: registran lo aprobado en su momento. Decisión del propietario del 20
 
 1. Registrar autorización, responsable de encendido, responsable de apagado y hora límite.
 2. Confirmar inventario residual vacío y que no existe otro ciclo activo.
-3. Elegir un identificador nuevo, por ejemplo `20261122-a`, y registrarlo en el acta de sesión.
+3. Validar que no exista otro ciclo activo ni residuos y reservar `20261123-a`; si ya existe, detenerse y
+   acordar el siguiente sufijo. Registrarlo en el acta de sesión y no modificarlo durante el ciclo.
 4. Confirmar SHA, arquitectura y los nueve tags/digests OCI publicados por `publisher`.
-5. Copiar `terraform.tfvars.example` fuera de Git y completar correos, SHA y `lab_cycle_id`.
+5. Copiar `terraform.tfvars.example` fuera de Git y completar SHA, `lab_cycle_id` y
+   `lab_role_permissions_boundary_arn`. Reutilizar el destinatario de `budget_emails` del tfvars privado de bootstrap para
+   `alarm_email` y `budget_emails`; si el archivo o el dato no existe, detenerse. No usar
+   `SYNTHETIC_ADMIN_EMAIL` como correo de notificaciones.
 6. Crear `lab-state-identity.json` del ciclo a partir del ejemplo, fuera del repositorio: backend real aprobado,
    workspace `default`, el `lab_cycle_id` nuevo y, si el backend ya tiene state (ciclos posteriores, state
    conservado vacío), su `lineage` y `serial` actuales como `minimum_serial`. Solo si el backend nunca tuvo
    state se registra `"lineage": null` y `"minimum_serial": 0`. Conservar su hash en el acta.
 7. Validar localmente `fmt`, `validate`, pruebas simuladas, TFLint, Checkov, Trivy y propiedad de states.
+   Ejecutar además `python3 ../../scripts/validate_lab_iam.py`: debe informar 12 roles con boundary y cero
+   rutas detectadas de escalada. Renderizar las políticas de `infra/terraform/iam` con los valores de cuenta,
+   bucket, KMS y boundary, y validarlas con IAM Access Analyzer/Policy Simulator antes de asignarlas.
 8. Inicializar únicamente el backend de `lab` y comprobar la clave estable
    `spectra-shop/lab/terraform.tfstate`.
 9. Revisar el plan: solo recursos de `lab`, servicios ECS a cero, RDS protegido, sin snapshot final y secretos
    bajo `spectra/lab/<lab_cycle_id>/`.
 10. Establecer un costo máximo de sesión y una hora de aborto. AWS Budgets avisa con retraso y no detiene nada.
 
+### 2.1 Identity Center por fase
+
+Los artefactos fuente están en `infra/terraform/iam/`. Su instalación o asignación no está autorizada por
+este runbook. `spectra-lab-deployer` usa una sola variante por sesión:
+
+1. `plan-policy.json`: base de inventario, refresh, lectura del state y lock; no puede escribir ni borrar el
+   state y no muta infraestructura.
+2. `deploy-policy.json`: se suma temporalmente a la base solo después de aprobar el SHA del plan; crea roles únicamente con la boundary exacta,
+   no puede cambiarla/retirarla y limita `PassRole` a ECS Tasks y VPC Flow Logs.
+3. `teardown-policy.json`: se suma temporalmente a la base solo después de validar los planes `prepare` y `destroy`; no puede crear roles,
+   cambiar sus políticas, pasarlos ni retirar la boundary.
+
+`spectra-lab-operator` observa el laboratorio y ejecuta/detiene tareas operativas aprobadas; no modifica IAM
+ni Terraform. Cerrar la sesión al cambiar de fase para no sumar permisos de dos variantes.
+
 ## 3. DESPLEGAR
+
+Para el ciclo `20261124-a`, la configuración privada está en
+`~/spectra-aws/lab/20261124-a`. Incluye `backend.hcl`, `terraform.tfvars.json`,
+`lab-state-identity.json` y las políticas IAM renderizadas. El tfvars fija los
+nueve digests del [run 45518462387](https://github.com/Torres21C/spectra-shop/actions/runs/45518462387). Desde la raíz
+Terraform del laboratorio y con una sesión `spectra-lab-deployer` en fase plan,
+verificar el índice `SHA256SUMS` privado, inicializar con
+`LAB_CONFIG=~/spectra-aws/lab/20261124-a` y
+`terraform init -backend-config="$LAB_CONFIG/backend.hcl"` y pasar
+`-var-file="$LAB_CONFIG/terraform.tfvars.json"` al plan de §3.0. Para
+`--identity` usar `"$LAB_CONFIG/lab-state-identity.json"`. Confirmar que el
+state sigue sin historial antes de usar la identidad de primer ciclo y que las
+diez definiciones ECS del plan llevan las referencias por digest esperadas.
 
 ### 3.0 Guard obligatorio antes de cada `apply` del ciclo
 
@@ -228,3 +268,6 @@ Con una autorización posterior de solo lectura:
 - log group o alarma huérfana;
 - state de `lab` con recursos o lock abandonado;
 - recurso sin etiquetas que no pueda atribuirse con seguridad.
+- rol `spectra-lab-*` sin la boundary exacta, o intento de Terraform/AWS de retirarla durante el destroy;
+- correo de presupuesto/alarma no comprobado contra la configuración local de bootstrap;
+- permission set activo de una fase anterior o combinación de variantes plan/deploy/teardown.

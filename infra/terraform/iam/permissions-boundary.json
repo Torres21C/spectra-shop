@@ -1,0 +1,54 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowEcrAuthorizationToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowPullOnlySpectraRepositories",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Resource": "arn:aws:ecr:__REGION__:__ACCOUNT_ID__:repository/spectra/*"
+    },
+    {
+      "Sid": "AllowOnlyLabLogGroups",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:__REGION__:__ACCOUNT_ID__:log-group:/spectra/lab/*:*"
+    },
+    {
+      "Sid": "AllowOnlyLabSecrets",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:__REGION__:__ACCOUNT_ID__:secret:spectra/lab/*"
+    },
+    {
+      "Sid": "AllowOnlyTaggedLabKeys",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:GetPublicKey", "kms:Sign"],
+      "Resource": "arn:aws:kms:__REGION__:__ACCOUNT_ID__:key/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "spectra-shop",
+          "aws:ResourceTag/Environment": "lab"
+        }
+      }
+    },
+    {
+      "Sid": "DenyPrivilegeEscalationAndBoundaryTampering",
+      "Effect": "Deny",
+      "Action": [
+        "iam:*",
+        "organizations:*",
+        "account:*",
+        "sts:AssumeRole",
+        "sts:AssumeRoleWithSAML",
+        "sts:AssumeRoleWithWebIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

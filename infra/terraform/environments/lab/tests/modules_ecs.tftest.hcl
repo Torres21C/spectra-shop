@@ -79,6 +79,34 @@ variables {
   inventory_token_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/20261122-a/inventory-token"
   synthetic_admin_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:spectra/lab/20261122-a/synthetic-admin"
   catalog_seed_demo_products = false
+  permissions_boundary_arn   = "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
+}
+
+run "ecs_published_digests" {
+  command = plan
+
+  module {
+    source = "../../modules/ecs"
+  }
+
+  variables {
+    image_digests = merge(
+      { for name in ["identity", "catalog", "commerce", "audit"] : "${name}-service-runtime" => "sha256:${sha256("runtime")}" },
+      { for name in ["identity", "catalog", "commerce", "audit"] : "${name}-service-migrate" => "sha256:${sha256("migrate")}" },
+      { db-ops = "sha256:${sha256("db-ops")}" }
+    )
+  }
+
+  assert {
+    condition = alltrue(concat(
+      [for name, task in aws_ecs_task_definition.service : jsondecode(task.container_definitions)[0].image == "${var.repository_urls["${name}-service"]}@sha256:${sha256("runtime")}"],
+      [for name, task in aws_ecs_task_definition.ops : jsondecode(task.container_definitions)[0].image == (
+        startswith(name, "db-") ? "${var.repository_urls["db-ops"]}@sha256:${sha256("db-ops")}" :
+        "${var.repository_urls["${trimsuffix(name, "-migrate")}-service"]}@sha256:${sha256("migrate")}"
+      )]
+    ))
+    error_message = "Las diez task definitions deben fijar las nueve imágenes OCI por digest."
+  }
 }
 
 run "ecs_task_security" {
@@ -86,6 +114,15 @@ run "ecs_task_security" {
 
   module {
     source = "../../modules/ecs"
+  }
+
+
+  assert {
+    condition = (
+      alltrue([for role in aws_iam_role.execution : role.permissions_boundary == "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"]) &&
+      aws_iam_role.identity_task.permissions_boundary == "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
+    )
+    error_message = "Todos los roles de ECS deben llevar la permissions boundary obligatoria."
   }
 
   assert {

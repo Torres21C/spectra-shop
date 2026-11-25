@@ -1,0 +1,58 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadLabInventoryForTerraformPlan",
+      "Effect": "Allow",
+      "Action": [
+        "acm:DescribeCertificate", "acm:ListCertificates",
+        "application-autoscaling:Describe*",
+        "budgets:Describe*", "budgets:ViewBudget",
+        "cloudfront:Get*", "cloudfront:List*",
+        "cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*",
+        "ec2:Describe*",
+        "ecr:Describe*", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy", "ecr:ListImages",
+        "ecs:Describe*", "ecs:List*",
+        "elasticloadbalancing:Describe*",
+        "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole", "iam:ListPolicyVersions", "iam:ListRolePolicies", "iam:ListRoleTags",
+        "kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:ListAliases", "kms:ListResourceTags",
+        "logs:Describe*", "logs:ListTagsForResource",
+        "rds:Describe*", "rds:ListTagsForResource",
+        "tag:GetResources",
+        "route53:ListHostedZones", "route53:ListResourceRecordSets",
+        "s3:GetBucket*", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration",
+        "secretsmanager:DescribeSecret", "secretsmanager:ListSecrets", "secretsmanager:ListSecretVersionIds",
+        "servicediscovery:Get*", "servicediscovery:List*",
+        "sns:GetTopicAttributes", "sns:ListSubscriptionsByTopic", "sns:ListTagsForResource",
+        "sts:GetCallerIdentity",
+        "wafv2:Get*", "wafv2:List*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadLabState",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate"
+    },
+    {
+      "Sid": "ManageOnlyLabStateLock",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "ListOnlyLabStatePrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::__TFSTATE_BUCKET__",
+      "Condition": {"StringLike": {"s3:prefix": ["spectra-shop/lab/terraform.tfstate", "spectra-shop/lab/terraform.tfstate.tflock"]}}
+    },
+    {
+      "Sid": "UseStateKmsKey",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"],
+      "Resource": "__STATE_KMS_KEY_ARN__"
+    }
+  ]
+}

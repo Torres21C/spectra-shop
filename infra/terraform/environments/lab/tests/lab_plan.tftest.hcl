@@ -46,8 +46,9 @@ mock_provider "aws" {
 mock_provider "random" {}
 
 variables {
-  image_tag    = "0123456789abcdef0123456789abcdef01234567"
-  lab_cycle_id = "20261122-a"
+  image_tag                         = "0123456789abcdef0123456789abcdef01234567"
+  lab_cycle_id                      = "20261122-a"
+  lab_role_permissions_boundary_arn = "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
 }
 
 run "plan_with_defaults" {
@@ -92,6 +93,22 @@ run "plan_with_defaults" {
     condition     = alltrue([for name in output.secret_names : startswith(name, "spectra/lab/20261122-a/")])
     error_message = "Todos los secretos deben quedar aislados bajo el identificador del ciclo."
   }
+
+
+  assert {
+    condition     = output.lab_role_permissions_boundary_arn == "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
+    error_message = "La boundary obligatoria debe quedar fijada y expuesta para evidencia."
+  }
+}
+
+run "rejects_wrong_permissions_boundary" {
+  command = plan
+
+  variables {
+    lab_role_permissions_boundary_arn = "arn:aws:iam::111122223333:policy/another-boundary"
+  }
+
+  expect_failures = [var.lab_role_permissions_boundary_arn]
 }
 
 run "rejects_invalid_lab_cycle_id" {

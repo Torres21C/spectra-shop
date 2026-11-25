@@ -51,6 +51,9 @@ done
 step "Propiedad de los recursos entre raíces (publisher solo ECR y OIDC; ningún recurso en dos states)"
 python3 -I scripts/check_state_ownership.py
 
+step "Boundary obligatoria y políticas IAM del laboratorio (sin llamadas AWS)"
+python3 -I scripts/validate_lab_iam.py
+
 step "TFLint"
 for dir in $ROOT_DIRS modules/*; do
   tflint --chdir="$dir" --config="$ROOT/.tflint.hcl" --format=compact

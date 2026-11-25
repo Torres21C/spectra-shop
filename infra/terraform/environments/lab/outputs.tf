@@ -118,3 +118,7 @@ output "internet_gateway_id" {
   description = "IGW asociado solo por requisito de CloudFront VPC origins (sin rutas; verificar en EV-AWS-LAB-RED)."
   value       = module.network.internet_gateway_id
 }
+output "lab_role_permissions_boundary_arn" {
+  description = "Boundary efectiva exigida a todos los roles IAM del state lab."
+  value       = var.lab_role_permissions_boundary_arn
+}

@@ -1,0 +1,7 @@
+{
+  "ACCOUNT_ID": "111122223333",
+  "REGION": "us-east-1",
+  "TFSTATE_BUCKET": "spectra-tfstate-111122223333-us-east-1",
+  "STATE_KMS_KEY_ARN": "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000",
+  "BOUNDARY_ARN": "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
+}
