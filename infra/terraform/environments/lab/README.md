@@ -42,6 +42,14 @@ terraform plan                                     # no guarde planes dentro del
 
 `image_tag` es el SHA completo del commit cuyas imágenes publicó PR-6 en ECR (servicios `:<sha>`, migraciones `:<sha>-migrate`, `db-ops:<sha>`). `lab_cycle_id` es obligatorio, identifica una sola creación y no puede cambiar hasta haber destruido y verificado el ciclo. Se registra en etiquetas y en los nombres `spectra/lab/<ciclo>/...`, pero no cambia el backend ni ECR. Véase el [runbook efímero](../../../../docs/operacion-y-aws/07-ciclo-laboratorio-efimero.md).
 
+`image_digests` fija las nueve imágenes por digest OCI en las task definitions de ECS. Para el
+plan real, cargar el mapa verificado junto con `image_tag` desde la configuración privada del ciclo.
+
+`lab_role_permissions_boundary_arn` también es obligatorio y solo acepta
+`arn:aws:iam::<cuenta>:policy/spectra-lab-runtime-boundary`. La policy debe preexistir fuera del state efímero;
+su fuente y las políticas/permission sets preparados están en [`../../iam`](../../iam). Los 12 roles del lab
+la reciben y las pruebas simuladas fallan si algún módulo la omite.
+
 ### 3.2 Primer `apply` (sin tareas)
 
 Con `service_desired_count = 0` y `alb_ingress_source = "prefix_list"`. Crea la red, los endpoints, KMS, RDS, secretos con valores generados, ALB, CloudFront con WAF, task definitions y servicios ECS **sin tareas**. ECR pertenece a `publisher` y aquí solo se lee. La política fija `synthetic-discard`: datos ficticios regenerables y ningún snapshot final cifrado por la CMK efímera. Antes debe existir el presupuesto (variable `budget_emails`). Este y todo `apply` posterior se hacen sobre un plan guardado validado con `lab_teardown_guard.py --mode deploy` ([runbook §3.0](../../../../docs/operacion-y-aws/07-ciclo-laboratorio-efimero.md)); el guard rechaza cambiar `lab_cycle_id` sobre un state activo.

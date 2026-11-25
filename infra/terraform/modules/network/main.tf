@@ -157,8 +157,9 @@ data "aws_iam_policy_document" "flow_logs_assume" {
 resource "aws_iam_role" "flow_logs" {
   count = var.enable_flow_logs ? 1 : 0
 
-  name               = "${var.name_prefix}-vpc-flow-logs"
-  assume_role_policy = data.aws_iam_policy_document.flow_logs_assume[0].json
+  name                 = "${var.name_prefix}-vpc-flow-logs"
+  assume_role_policy   = data.aws_iam_policy_document.flow_logs_assume[0].json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "flow_logs" {

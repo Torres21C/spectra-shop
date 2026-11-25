@@ -53,6 +53,22 @@ variable "repository_arns" {
   type        = map(string)
 }
 
+variable "image_digests" {
+  description = "Digests por nombre de imagen en el manifiesto de publicación ECR."
+  type        = map(string)
+  default     = null
+
+  validation {
+    condition = var.image_digests == null ? true : (
+      toset(keys(var.image_digests)) == toset(concat(["db-ops"], flatten([
+        for service in ["identity", "catalog", "commerce", "audit"] :
+        ["${service}-service-runtime", "${service}-service-migrate"]
+      ]))) && alltrue([for digest in values(var.image_digests) : can(regex("^sha256:[0-9a-f]{64}$", digest))])
+    )
+    error_message = "image_digests debe contener los nueve digests SHA-256 del manifiesto ECR."
+  }
+}
+
 variable "image_tag" {
   description = "SHA completo del commit publicado por PR-6 (runtime: <sha>; migración: <sha>-migrate)."
   type        = string
@@ -173,4 +189,9 @@ variable "synthetic_admin_secret_arn" {
 variable "catalog_seed_demo_products" {
   description = "catalog-migrate ejecuta el seed de productos de demostración (AWS-25)."
   type        = bool
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary obligatoria para todos los roles de ejecución y tarea de ECS."
+  type        = string
 }

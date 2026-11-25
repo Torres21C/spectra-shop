@@ -6,7 +6,11 @@ image_tag = "0000000000000000000000000000000000000000"
 
 # Identificador único de esta creación. No se cambia en un laboratorio existente; el siguiente ciclo usa
 # otro valor después de verificar el destroy completo (p. ej. 20261122-b).
-lab_cycle_id = "20261122-a"
+lab_cycle_id = "20261123-a"
+
+# Boundary preexistente, creada fuera del state efímero con el artefacto iam/permissions-boundary.json.
+# Sustituya solo el ID de cuenta; el nombre es fijo y las políticas de despliegue impiden cambiarla.
+lab_role_permissions_boundary_arn = "arn:aws:iam::000000000000:policy/spectra-lab-runtime-boundary"
 
 # Única política admitida: datos ficticios regenerables, sin snapshot final cifrado por la CMK efímera.
 lab_data_policy = "synthetic-discard"

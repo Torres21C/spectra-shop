@@ -1,0 +1,423 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteLabState",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate"
+    },
+    {
+      "Sid": "DenyRegionalActionsOutsideUsEast1",
+      "Effect": "Deny",
+      "Action": [
+        "acm:*",
+        "application-autoscaling:*",
+        "cloudwatch:*",
+        "ec2:*",
+        "ecr:*",
+        "ecs:*",
+        "elasticloadbalancing:*",
+        "kms:*",
+        "logs:*",
+        "rds:*",
+        "secretsmanager:*",
+        "servicediscovery:*",
+        "sns:*",
+        "wafv2:*"
+      ],
+      "Resource": "*",
+      "Condition": { "StringNotEquals": { "aws:RequestedRegion": "__REGION__" } }
+    },
+    {
+      "Sid": "DenyUnboundedRoleCreation",
+      "Effect": "Deny",
+      "Action": "iam:CreateRole",
+      "Resource": "*",
+      "Condition": { "Null": { "iam:PermissionsBoundary": "true" } }
+    },
+    {
+      "Sid": "DenyBoundaryPolicyMutation",
+      "Effect": "Deny",
+      "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion"
+      ],
+      "Resource": "__BOUNDARY_ARN__"
+    },
+    {
+      "Sid": "DenyRemovingAnyRoleBoundary",
+      "Effect": "Deny",
+      "Action": "iam:DeleteRolePermissionsBoundary",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyReplacingWithAnotherBoundary",
+      "Effect": "Deny",
+      "Action": "iam:PutRolePermissionsBoundary",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageOnlyBoundedLabRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+        "iam:PutRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:UpdateRoleDescription"
+      ],
+      "Resource": [
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"
+      ],
+      "Condition": { "ArnEqualsIfExists": { "iam:PermissionsBoundary": "__BOUNDARY_ARN__" } }
+    },
+    {
+      "Sid": "CreateOnlyBoundedLabRoles",
+      "Effect": "Allow",
+      "Action": "iam:CreateRole",
+      "Resource": [
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"
+      ],
+      "Condition": { "ArnEquals": { "iam:PermissionsBoundary": "__BOUNDARY_ARN__" } }
+    },
+    {
+      "Sid": "PassOnlyBoundedLabRolesToRequiredServices",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": ["ecs-tasks.amazonaws.com", "vpc-flow-logs.amazonaws.com"]
+        }
+      }
+    },
+    {
+      "Sid": "DenyForeignProject",
+      "Effect": "Deny",
+      "Action": [
+        "cloudfront:*Distribution",
+        "cloudfront:*VpcOrigin",
+        "ec2:DeleteFlowLogs",
+        "ec2:DeleteInternetGateway",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVpc*",
+        "ec2:Modify*Attribute",
+        "ec2:ModifySecurityGroupRules",
+        "ecs:*Cluster",
+        "ecs:*Service",
+        "elasticloadbalancing:Modify*",
+        "elasticloadbalancing:Delete*",
+        "kms:Put*",
+        "kms:Disable*",
+        "kms:ScheduleKeyDeletion",
+        "logs:DeleteLogGroup",
+        "logs:DeleteMetricFilter",
+        "rds:*DBInstance",
+        "rds:*DBParameterGroup",
+        "rds:*DBSubnetGroup",
+        "secretsmanager:Update*",
+        "secretsmanager:Delete*",
+        "servicediscovery:Update*",
+        "servicediscovery:Delete*",
+        "sns:DeleteTopic",
+        "wafv2:*IPSet",
+        "wafv2:DeleteLoggingConfiguration",
+        "wafv2:DeleteWebACL",
+        "wafv2:UpdateWebACL"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:ResourceTag/Project": "spectra-shop" },
+        "Null": { "aws:ResourceTag/Project": "false" }
+      }
+    },
+    {
+      "Sid": "DenyForeignEnvironment",
+      "Effect": "Deny",
+      "Action": [
+        "cloudfront:*Distribution",
+        "cloudfront:*VpcOrigin",
+        "ec2:DeleteFlowLogs",
+        "ec2:DeleteInternetGateway",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVpc*",
+        "ec2:Modify*Attribute",
+        "ec2:ModifySecurityGroupRules",
+        "ecs:*Cluster",
+        "ecs:*Service",
+        "elasticloadbalancing:Modify*",
+        "elasticloadbalancing:Delete*",
+        "kms:Put*",
+        "kms:Disable*",
+        "kms:ScheduleKeyDeletion",
+        "logs:DeleteLogGroup",
+        "logs:DeleteMetricFilter",
+        "rds:*DBInstance",
+        "rds:*DBParameterGroup",
+        "rds:*DBSubnetGroup",
+        "secretsmanager:Update*",
+        "secretsmanager:Delete*",
+        "servicediscovery:Update*",
+        "servicediscovery:Delete*",
+        "sns:DeleteTopic",
+        "wafv2:*IPSet",
+        "wafv2:DeleteLoggingConfiguration",
+        "wafv2:DeleteWebACL",
+        "wafv2:UpdateWebACL"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": { "aws:ResourceTag/Environment": "lab" },
+        "Null": { "aws:ResourceTag/Environment": "false" }
+      }
+    },
+    {
+      "Sid": "CreateLabResourcesOnlyWithRequiredTags",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:CreateVpcOrigin",
+        "ec2:CreateFlowLogs",
+        "ec2:CreateInternetGateway",
+        "ec2:CreateRouteTable",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateSubnet",
+        "ec2:CreateVpc",
+        "ec2:CreateVpcEndpoint",
+        "ecs:CreateCluster",
+        "ecs:CreateService",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateRule",
+        "elasticloadbalancing:CreateTargetGroup",
+        "logs:CreateLogGroup",
+        "rds:CreateDBInstance",
+        "rds:CreateDBParameterGroup",
+        "rds:CreateDBSubnetGroup",
+        "secretsmanager:CreateSecret",
+        "servicediscovery:CreatePrivateDnsNamespace",
+        "servicediscovery:CreateService",
+        "sns:CreateTopic",
+        "wafv2:CreateIPSet",
+        "wafv2:CreateWebACL"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "spectra-shop",
+          "aws:RequestTag/Environment": "lab"
+        },
+        "Null": { "aws:RequestTag/LabCycle": "false" }
+      }
+    },
+    {
+      "Sid": "CreateLabKmsKeysOnlyWithRequiredTags",
+      "Effect": "Allow",
+      "Action": "kms:CreateKey",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "spectra-shop",
+          "aws:RequestTag/Environment": "lab"
+        },
+        "Null": { "aws:RequestTag/LabCycle": "false" }
+      }
+    },
+    {
+      "Sid": "ManageOnlyTaggedLabKmsKeys",
+      "Effect": "Allow",
+      "Action": [
+        "kms:CancelKeyDeletion",
+        "kms:CreateAlias",
+        "kms:DeleteAlias",
+        "kms:DisableKey",
+        "kms:EnableKey",
+        "kms:EnableKeyRotation",
+        "kms:PutKeyPolicy",
+        "kms:ScheduleKeyDeletion",
+        "kms:TagResource",
+        "kms:UntagResource"
+      ],
+      "Resource": "arn:aws:kms:__REGION__:__ACCOUNT_ID__:key/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "spectra-shop",
+          "aws:ResourceTag/Environment": "lab"
+        }
+      }
+    },
+    {
+      "Sid": "CreateGrantsOnlyForAwsResourcesOnTaggedLabKeys",
+      "Effect": "Allow",
+      "Action": "kms:CreateGrant",
+      "Resource": "arn:aws:kms:__REGION__:__ACCOUNT_ID__:key/*",
+      "Condition": {
+        "Bool": { "kms:GrantIsForAWSResource": "true" },
+        "StringEquals": {
+          "aws:ResourceTag/Project": "spectra-shop",
+          "aws:ResourceTag/Environment": "lab"
+        }
+      }
+    },
+    {
+      "Sid": "ManageOnlyFixedLabSpaBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:DeleteBucketPolicy",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:PutBucketCORS",
+        "s3:PutBucketOwnershipControls",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketTagging",
+        "s3:PutBucketVersioning",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutLifecycleConfiguration"
+      ],
+      "Resource": [
+        "arn:aws:s3:::spectra-lab-spa-__ACCOUNT_ID__",
+        "arn:aws:s3:::spectra-lab-spa-__ACCOUNT_ID__/*"
+      ]
+    },
+    {
+      "Sid": "ManageOnlyFixedLabBudget",
+      "Effect": "Allow",
+      "Action": "budgets:ModifyBudget",
+      "Resource": "arn:aws:budgets::__ACCOUNT_ID__:budget/spectra-lab-monthly"
+    },
+    {
+      "Sid": "ManageExistingLabResources",
+      "Effect": "Allow",
+      "Action": [
+        "application-autoscaling:DeleteScalingPolicy",
+        "application-autoscaling:DeregisterScalableTarget",
+        "application-autoscaling:PutScalingPolicy",
+        "application-autoscaling:RegisterScalableTarget",
+        "cloudfront:CreateResponseHeadersPolicy",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:DeleteResponseHeadersPolicy",
+        "cloudfront:DeleteVpcOrigin",
+        "cloudfront:TagResource",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:UpdateOriginAccessControl",
+        "cloudfront:UpdateResponseHeadersPolicy",
+        "cloudfront:UpdateVpcOrigin",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:PutMetricAlarm",
+        "ec2:CreateTags",
+        "ec2:DeleteFlowLogs",
+        "ec2:DeleteInternetGateway",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVpc",
+        "ec2:DeleteVpcEndpoints",
+        "ec2:ModifySecurityGroupRules",
+        "ec2:ModifySubnetAttribute",
+        "ec2:ModifyVpcAttribute",
+        "ec2:ModifyVpcEndpoint",
+        "ec2:ReplaceRouteTableAssociation",
+        "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable",
+        "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ecs:DeleteCluster",
+        "ecs:DeleteService",
+        "ecs:DeregisterTaskDefinition",
+        "ecs:PutClusterCapacityProviders",
+        "ecs:RegisterTaskDefinition",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:UpdateCluster",
+        "ecs:UpdateService",
+        "elasticloadbalancing:AddTags",
+        "elasticloadbalancing:DeleteListener",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:DeleteRule",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:ModifyLoadBalancerAttributes",
+        "elasticloadbalancing:ModifyRule",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
+        "elasticloadbalancing:RemoveTags",
+        "logs:AssociateKmsKey",
+        "logs:DeleteLogGroup",
+        "logs:DeleteMetricFilter",
+        "logs:PutMetricFilter",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "rds:AddTagsToResource",
+        "rds:DeleteDBInstance",
+        "rds:DeleteDBParameterGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:ModifyDBInstance",
+        "rds:ModifyDBParameterGroup",
+        "rds:ModifyDBSubnetGroup",
+        "rds:RemoveTagsFromResource",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:TagResource",
+        "secretsmanager:UntagResource",
+        "secretsmanager:UpdateSecret",
+        "servicediscovery:DeleteNamespace",
+        "servicediscovery:DeleteService",
+        "servicediscovery:TagResource",
+        "servicediscovery:UpdateService",
+        "sns:DeleteTopic",
+        "sns:SetTopicAttributes",
+        "sns:Subscribe",
+        "sns:TagResource",
+        "sns:Unsubscribe",
+        "sns:UntagResource",
+        "wafv2:AssociateWebACL",
+        "wafv2:DeleteIPSet",
+        "wafv2:DeleteLoggingConfiguration",
+        "wafv2:DeleteWebACL",
+        "wafv2:DisassociateWebACL",
+        "wafv2:PutLoggingConfiguration",
+        "wafv2:TagResource",
+        "wafv2:UntagResource",
+        "wafv2:UpdateIPSet",
+        "wafv2:UpdateWebACL"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEqualsIfExists": {
+          "aws:ResourceTag/Project": "spectra-shop",
+          "aws:ResourceTag/Environment": "lab"
+        }
+      }
+    }
+  ]
+}

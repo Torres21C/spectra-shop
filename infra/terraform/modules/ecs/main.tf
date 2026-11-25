@@ -101,8 +101,12 @@ resource "aws_ecs_task_definition" "service" {
 
   container_definitions = jsonencode([
     {
-      name      = each.key
-      image     = "${var.repository_urls[local.services[each.key].repository]}:${var.image_tag}"
+      name = each.key
+      image = var.image_digests == null ? (
+        "${var.repository_urls[local.services[each.key].repository]}:${var.image_tag}"
+        ) : (
+        "${var.repository_urls[local.services[each.key].repository]}@${var.image_digests["${local.services[each.key].repository}-runtime"]}"
+      )
       essential = true
 
       portMappings = concat(
@@ -158,8 +162,12 @@ resource "aws_ecs_task_definition" "ops" {
 
   container_definitions = jsonencode([
     {
-      name      = each.key
-      image     = "${var.repository_urls[local.ops[each.key].repository]}:${local.ops[each.key].image_tag}"
+      name = each.key
+      image = var.image_digests == null ? (
+        "${var.repository_urls[local.ops[each.key].repository]}:${local.ops[each.key].image_tag}"
+        ) : (
+        "${var.repository_urls[local.ops[each.key].repository]}@${var.image_digests[local.ops[each.key].repository == "db-ops" ? "db-ops" : "${local.ops[each.key].repository}-migrate"]}"
+      )
       essential = true
       command   = local.ops[each.key].command
 

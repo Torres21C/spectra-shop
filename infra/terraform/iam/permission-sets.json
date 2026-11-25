@@ -1,0 +1,22 @@
+{
+  "permission_sets": [
+    {
+      "name": "spectra-lab-deployer",
+      "session_duration": "PT2H",
+      "base_policy": "plan-policy.json",
+      "phase_policy_variants": ["deploy-policy.json", "teardown-policy.json"],
+      "activation_rule": "Plan usa solo base; deploy o teardown agrega exactamente una policy de fase y exige cerrar la sesión anterior."
+    },
+    {
+      "name": "spectra-lab-operator",
+      "session_duration": "PT1H",
+      "policy_variants": ["operator-policy.json"],
+      "activation_rule": "Operación y evidencia; sin permisos de Terraform ni mutación IAM."
+    }
+  ],
+  "permissions_boundary": {
+    "name": "spectra-lab-runtime-boundary",
+    "document": "permissions-boundary.json",
+    "lifecycle": "Preexistente y fuera del state efímero de lab; no se elimina en teardown."
+  }
+}

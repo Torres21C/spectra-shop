@@ -18,17 +18,18 @@ run "network_is_private" {
   }
 
   variables {
-    name_prefix        = "spectra-lab"
-    environment        = "lab"
-    region             = "us-east-1"
-    account_id         = "111122223333"
-    vpc_cidr           = "10.20.0.0/16"
-    az_ids             = ["use1-az1", "use1-az2"]
-    app_subnet_cidrs   = ["10.20.1.0/24", "10.20.2.0/24"]
-    data_subnet_cidrs  = ["10.20.11.0/24", "10.20.12.0/24"]
-    enable_flow_logs   = true
-    log_retention_days = 30
-    logs_kms_key_arn   = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
+    name_prefix              = "spectra-lab"
+    environment              = "lab"
+    region                   = "us-east-1"
+    account_id               = "111122223333"
+    vpc_cidr                 = "10.20.0.0/16"
+    az_ids                   = ["use1-az1", "use1-az2"]
+    app_subnet_cidrs         = ["10.20.1.0/24", "10.20.2.0/24"]
+    data_subnet_cidrs        = ["10.20.11.0/24", "10.20.12.0/24"]
+    enable_flow_logs         = true
+    log_retention_days       = 30
+    logs_kms_key_arn         = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
+    permissions_boundary_arn = "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
   }
 
   assert {
@@ -42,6 +43,11 @@ run "network_is_private" {
   assert {
     condition     = toset([for s in aws_subnet.app : s.availability_zone_id]) == toset(["use1-az1", "use1-az2"])
     error_message = "Las subredes deben fijarse por AZ ID."
+  }
+
+  assert {
+    condition     = aws_iam_role.flow_logs[0].permissions_boundary == "arn:aws:iam::111122223333:policy/spectra-lab-runtime-boundary"
+    error_message = "El rol de VPC Flow Logs debe llevar la permissions boundary obligatoria."
   }
 
   # La ausencia de rutas (ni aws_route ni bloques route) se comprueba de forma estática en
@@ -82,6 +88,8 @@ run "security_groups_have_no_open_cidrs" {
     condition     = toset([for r in aws_vpc_security_group_ingress_rule.service_from_alb : r.from_port]) == toset([3001, 3002, 3003, 3004])
     error_message = "El ALB solo alcanza los puertos públicos."
   }
+
+
 }
 
 run "secrets_never_planned_in_clear" {

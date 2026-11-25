@@ -68,17 +68,18 @@ module "kms" {
 module "network" {
   source = "../../modules/network"
 
-  name_prefix        = local.name_prefix
-  environment        = var.environment
-  region             = var.aws_region
-  account_id         = local.account_id
-  vpc_cidr           = var.vpc_cidr
-  az_ids             = var.az_ids
-  app_subnet_cidrs   = var.app_subnet_cidrs
-  data_subnet_cidrs  = var.data_subnet_cidrs
-  enable_flow_logs   = var.enable_flow_logs
-  log_retention_days = var.log_retention_days
-  logs_kms_key_arn   = module.kms.data_key_arn
+  name_prefix              = local.name_prefix
+  environment              = var.environment
+  region                   = var.aws_region
+  account_id               = local.account_id
+  vpc_cidr                 = var.vpc_cidr
+  az_ids                   = var.az_ids
+  app_subnet_cidrs         = var.app_subnet_cidrs
+  data_subnet_cidrs        = var.data_subnet_cidrs
+  enable_flow_logs         = var.enable_flow_logs
+  log_retention_days       = var.log_retention_days
+  logs_kms_key_arn         = module.kms.data_key_arn
+  permissions_boundary_arn = var.lab_role_permissions_boundary_arn
 }
 
 module "security_groups" {
@@ -205,6 +206,7 @@ module "ecs" {
   repository_urls             = local.repository_urls
   repository_arns             = local.repository_arns
   image_tag                   = var.image_tag
+  image_digests               = var.image_digests
   cpu_architecture            = var.cpu_architecture
   service_desired_count       = var.service_desired_count
   service_sizes               = var.service_sizes
@@ -227,6 +229,7 @@ module "ecs" {
   inventory_token_secret_arn  = module.secrets.inventory_token_secret_arn
   synthetic_admin_secret_arn  = module.secrets.synthetic_admin_secret_arn
   catalog_seed_demo_products  = var.catalog_seed_demo_products
+  permissions_boundary_arn    = var.lab_role_permissions_boundary_arn
 
   # Las tareas solo pueden arrancar cuando existen los endpoints (sin ellos no hay ECR, logs ni secretos).
   depends_on = [module.endpoints]

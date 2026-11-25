@@ -35,9 +35,10 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 resource "aws_iam_role" "execution" {
   for_each = toset(keys(local.workloads))
 
-  name               = "${var.name_prefix}-exec-${each.key}"
-  description        = "Rol de ejecucion ECS de ${each.key} (imagen, logs y sus secretos)"
-  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  name                 = "${var.name_prefix}-exec-${each.key}"
+  description          = "Rol de ejecucion ECS de ${each.key} (imagen, logs y sus secretos)"
+  assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_assume.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "execution" {
@@ -97,9 +98,10 @@ resource "aws_iam_role_policy" "execution" {
 # Rol de tarea de identity-service: firma de JWT con KMS (ADR-AWS-02).
 # ---------------------------------------------------------------------------------------------------------
 resource "aws_iam_role" "identity_task" {
-  name               = "${var.name_prefix}-task-identity"
-  description        = "Rol de tarea de identity-service: firma ES256 con KMS"
-  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  name                 = "${var.name_prefix}-task-identity"
+  description          = "Rol de tarea de identity-service: firma ES256 con KMS"
+  assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_assume.json
+  permissions_boundary = var.permissions_boundary_arn
 }
 
 data "aws_iam_policy_document" "identity_task" {

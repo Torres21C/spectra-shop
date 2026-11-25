@@ -44,6 +44,16 @@ variable "lab_data_policy" {
   }
 }
 
+variable "lab_role_permissions_boundary_arn" {
+  description = "ARN de la permissions boundary inmutable y preexistente que limita todos los roles creados por lab. Debe llamarse spectra-lab-runtime-boundary."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:iam::[0-9]{12}:policy/spectra-lab-runtime-boundary$", var.lab_role_permissions_boundary_arn))
+    error_message = "lab_role_permissions_boundary_arn debe ser arn:aws:iam::<cuenta>:policy/spectra-lab-runtime-boundary."
+  }
+}
+
 variable "teardown_mode" {
   description = "Habilita la configuración controlada previa al destroy. No ejecuta ninguna acción por sí sola."
   type        = bool
@@ -399,6 +409,12 @@ variable "synthetic_admin_email" {
 # ---------------------------------------------------------------------------------------------------------
 # Cómputo
 # ---------------------------------------------------------------------------------------------------------
+variable "image_digests" {
+  description = "Digests OCI verificados del manifiesto ECR del commit image_tag. La configuración real del laboratorio debe fijar las nueve imágenes."
+  type        = map(string)
+  default     = null
+}
+
 variable "image_tag" {
   description = "SHA completo (40 hex) del commit de main publicado en ECR por PR-6. Los servicios usan <sha>; las migraciones, <sha>-migrate."
   type        = string

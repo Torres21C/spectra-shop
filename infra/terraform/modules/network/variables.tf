@@ -52,3 +52,8 @@ variable "logs_kms_key_arn" {
   description = "ARN de la CMK con la que se cifran los log groups."
   type        = string
 }
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary obligatoria para el rol de entrega de VPC Flow Logs."
+  type        = string
+}
