@@ -5,14 +5,24 @@
       "Sid": "WriteOnlyLabStateAndLock",
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-      "Resource": ["arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate", "arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate.tflock"]
+      "Resource": [
+        "arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate",
+        "arn:aws:s3:::__TFSTATE_BUCKET__/spectra-shop/lab/terraform.tfstate.tflock"
+      ]
     },
     {
       "Sid": "ListOnlyLabStatePrefix",
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::__TFSTATE_BUCKET__",
-      "Condition": {"StringLike": {"s3:prefix": ["spectra-shop/lab/terraform.tfstate", "spectra-shop/lab/terraform.tfstate.tflock"]}}
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "spectra-shop/lab/terraform.tfstate",
+            "spectra-shop/lab/terraform.tfstate.tflock"
+          ]
+        }
+      }
     },
     {
       "Sid": "UseOnlyStateKmsKey",
@@ -23,14 +33,37 @@
     {
       "Sid": "DenyBoundaryPolicyMutationDuringTeardown",
       "Effect": "Deny",
-      "Action": ["iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:DeleteRolePermissionsBoundary", "iam:PutRolePermissionsBoundary"],
-      "Resource": ["__BOUNDARY_ARN__", "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*", "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity", "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"]
+      "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutRolePermissionsBoundary"
+      ],
+      "Resource": [
+        "__BOUNDARY_ARN__",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"
+      ]
     },
     {
       "Sid": "DeleteOnlyLabRolesAfterDependentResources",
       "Effect": "Allow",
-      "Action": ["iam:DeleteRole", "iam:DeleteRolePolicy", "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListRoleTags"],
-      "Resource": ["arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*", "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity", "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"]
+      "Action": [
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags"
+      ],
+      "Resource": [
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-exec-*",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-task-identity",
+        "arn:aws:iam::__ACCOUNT_ID__:role/spectra-lab-vpc-flow-logs"
+      ]
     },
     {
       "Sid": "TeardownOnlyFixedLabBudget",
@@ -41,26 +74,70 @@
     {
       "Sid": "TeardownOnlyFixedLabSpaBucket",
       "Effect": "Allow",
-      "Action": ["s3:DeleteBucket", "s3:DeleteBucketPolicy", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:PutBucketOwnershipControls", "s3:PutBucketVersioning"],
-      "Resource": ["arn:aws:s3:::spectra-lab-spa-__ACCOUNT_ID__", "arn:aws:s3:::spectra-lab-spa-__ACCOUNT_ID__/*"]
+      "Action": [
+        "s3:DeleteBucket",
+        "s3:DeleteBucketPolicy",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:PutBucketOwnershipControls",
+        "s3:PutBucketVersioning"
+      ],
+      "Resource": [
+        "arn:aws:s3:::spectra-lab-spa-__ACCOUNT_ID__",
+        "arn:aws:s3:::spectra-lab-spa-__ACCOUNT_ID__/*"
+      ]
     },
     {
       "Sid": "TeardownLabResources",
       "Effect": "Allow",
       "Action": [
-        "application-autoscaling:DeleteScalingPolicy", "application-autoscaling:DeregisterScalableTarget",
-        "cloudfront:DeleteDistribution", "cloudfront:DeleteOriginAccessControl", "cloudfront:DeleteResponseHeadersPolicy", "cloudfront:DeleteVpcOrigin", "cloudfront:UpdateDistribution",
+        "application-autoscaling:DeleteScalingPolicy",
+        "application-autoscaling:DeregisterScalableTarget",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:DeleteResponseHeadersPolicy",
+        "cloudfront:DeleteVpcOrigin",
+        "cloudfront:UpdateDistribution",
         "cloudwatch:DeleteAlarms",
-        "ec2:DeleteFlowLogs", "ec2:DeleteInternetGateway", "ec2:DeleteRouteTable", "ec2:DeleteSecurityGroup", "ec2:DeleteSubnet", "ec2:DeleteVpc", "ec2:DeleteVpcEndpoints", "ec2:DeleteTags", "ec2:DetachInternetGateway", "ec2:DisassociateRouteTable", "ec2:RevokeSecurityGroupEgress", "ec2:RevokeSecurityGroupIngress",
-        "ecs:DeleteCluster", "ecs:DeleteService", "ecs:DeregisterTaskDefinition", "ecs:UpdateService",
-        "elasticloadbalancing:DeleteListener", "elasticloadbalancing:DeleteLoadBalancer", "elasticloadbalancing:DeleteRule", "elasticloadbalancing:DeleteTargetGroup", "elasticloadbalancing:ModifyLoadBalancerAttributes",
-        "kms:DeleteAlias", "kms:DisableKey", "kms:ScheduleKeyDeletion",
-        "logs:DeleteLogGroup", "logs:DeleteMetricFilter",
-        "rds:DeleteDBInstance", "rds:DeleteDBParameterGroup", "rds:DeleteDBSubnetGroup", "rds:ModifyDBInstance",
+        "ec2:DeleteFlowLogs",
+        "ec2:DeleteInternetGateway",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVpc",
+        "ec2:DeleteVpcEndpoints",
+        "ec2:DeleteTags",
+        "ec2:DetachInternetGateway",
+        "ec2:DisassociateRouteTable",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ecs:DeleteCluster",
+        "ecs:DeleteService",
+        "ecs:DeregisterTaskDefinition",
+        "ecs:UpdateService",
+        "elasticloadbalancing:DeleteListener",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:DeleteRule",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:ModifyLoadBalancerAttributes",
+        "kms:DeleteAlias",
+        "kms:DisableKey",
+        "kms:ScheduleKeyDeletion",
+        "logs:DeleteLogGroup",
+        "logs:DeleteMetricFilter",
+        "rds:DeleteDBInstance",
+        "rds:DeleteDBParameterGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:ModifyDBInstance",
         "secretsmanager:DeleteSecret",
-        "servicediscovery:DeleteNamespace", "servicediscovery:DeleteService",
-        "sns:DeleteTopic", "sns:Unsubscribe",
-        "wafv2:DeleteIPSet", "wafv2:DeleteLoggingConfiguration", "wafv2:DeleteWebACL", "wafv2:DisassociateWebACL"
+        "servicediscovery:DeleteNamespace",
+        "servicediscovery:DeleteService",
+        "sns:DeleteTopic",
+        "sns:Unsubscribe",
+        "wafv2:DeleteIPSet",
+        "wafv2:DeleteLoggingConfiguration",
+        "wafv2:DeleteWebACL",
+        "wafv2:DisassociateWebACL"
       ],
       "Resource": "*"
     }

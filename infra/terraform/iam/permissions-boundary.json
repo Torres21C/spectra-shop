@@ -10,7 +10,11 @@
     {
       "Sid": "AllowPullOnlySpectraRepositories",
       "Effect": "Allow",
-      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
       "Resource": "arn:aws:ecr:__REGION__:__ACCOUNT_ID__:repository/spectra/*"
     },
     {
